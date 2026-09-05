@@ -36,4 +36,5 @@ func init() {
 	rootCmd.AddCommand(newStatsCmd())
 	rootCmd.AddCommand(newDuplicatesCmd())
 	rootCmd.AddCommand(newAnalyzeCmd())
+	rootCmd.AddCommand(newCleanCmd())
 }

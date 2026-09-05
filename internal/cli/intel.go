@@ -12,22 +12,33 @@ import (
 )
 
 func newIndexCmd() *cobra.Command {
-	var computeHashes bool
+	var (
+		computeHashes bool
+		clearIndex    bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "index [path]",
-		Short: "Create or update local CHEST file index in SQLite",
+		Short: "Create, update, or clear local CHEST file index in SQLite",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := "."
-			if len(args) > 0 {
-				path = args[0]
-			}
-
 			store, err := indexer.OpenOrCreate()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
+
+			if clearIndex {
+				if err := store.ClearIndex(); err != nil {
+					return fmt.Errorf("failed clearing index: %w", err)
+				}
+				fmt.Println("\x1b[1;38;5;82m✔ SQLite cache cleared successfully (files table emptied).\x1b[0m")
+				return nil
+			}
+
+			path := "."
+			if len(args) > 0 {
+				path = args[0]
+			}
 
 			fmt.Printf("\x1b[38;5;254mIndexing directory \x1b[38;5;220m%s\x1b[0m...\n", path)
 			start := time.Now()
@@ -45,6 +56,42 @@ func newIndexCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&computeHashes, "hash", false, "Compute cryptographic SHA256 hashes during indexing")
+	cmd.Flags().BoolVar(&clearIndex, "clear", false, "Clear and truncate cached file index records")
+	return cmd
+}
+
+func newCleanCmd() *cobra.Command {
+	var purgeAll bool
+
+	cmd := &cobra.Command{
+		Use:   "clean",
+		Short: "Delete cached index database and temporary data",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := indexer.OpenOrCreate()
+			if err != nil {
+				return err
+			}
+
+			if purgeAll {
+				if err := store.DeleteDB(); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("failed removing db: %w", err)
+				}
+				fmt.Println("\x1b[1;38;5;82m✔ Completely removed ~/.chest/index.db database file.\x1b[0m")
+				return nil
+			}
+
+			if err := store.ClearIndex(); err != nil {
+				_ = store.Close()
+				return err
+			}
+			_ = store.Close()
+
+			fmt.Println("\x1b[1;38;5;82m✔ Cleaned index cache in SQLite. (Use --all to delete entire database file)\x1b[0m")
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&purgeAll, "all", false, "Completely delete the ~/.chest/index.db database file")
 	return cmd
 }
 

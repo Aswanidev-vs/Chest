@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Aswanidev-vs/chest/internal/classifier"
+	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/charlievieth/fastwalk"
 	_ "github.com/ncruces/go-sqlite3/driver"
 )
@@ -54,10 +55,6 @@ type AnalyzeReport struct {
 	EmptyFiles      []IndexedFile    `json:"empty_files"`
 }
 
-// Store wraps SQLite index database
-type Store struct {
-	db *sql.DB
-}
 
 // OpenOrCreate opens or creates local sqlite index database
 func OpenOrCreate(customPath ...string) (*Store, error) {
@@ -93,18 +90,153 @@ func OpenOrCreate(customPath ...string) (*Store, error) {
 	CREATE INDEX IF NOT EXISTS idx_files_category ON files(category);
 	CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
 	CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);
+
+	CREATE TABLE IF NOT EXISTS history_entries (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp INTEGER,
+		directory TEXT,
+		files_count INTEGER,
+		status TEXT
+	);
+
+	CREATE TABLE IF NOT EXISTS history_operations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		entry_id INTEGER,
+		original_source TEXT,
+		destination TEXT,
+		reason TEXT,
+		FOREIGN KEY(entry_id) REFERENCES history_entries(id)
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed creating schema: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	return &Store{db: db, dbPath: dbPath}, nil
+}
+
+// Store wraps SQLite index database
+type Store struct {
+	db     *sql.DB
+	dbPath string
 }
 
 // Close database connection
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// ClearIndex truncates cached file records without deleting history
+func (s *Store) ClearIndex() error {
+	_, err := s.db.Exec("DELETE FROM files; VACUUM;")
+	return err
+}
+
+// DeleteDB closes and removes database file completely
+func (s *Store) DeleteDB() error {
+	_ = s.db.Close()
+	return os.Remove(s.dbPath)
+}
+
+// RecordHistory saves operation run into SQLite
+func (s *Store) RecordHistory(directory string, ops []models.HistoryOperation) (*models.HistoryEntry, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now()
+	res, err := tx.Exec("INSERT INTO history_entries (timestamp, directory, files_count, status) VALUES (?, ?, ?, ?)",
+		now.Unix(), directory, len(ops), "Complete")
+	if err != nil {
+		return nil, err
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+
+	stmt, err := tx.Prepare("INSERT INTO history_operations (entry_id, original_source, destination, reason) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	for _, op := range ops {
+		if _, err := stmt.Exec(id, op.OriginalSource, op.Destination, op.Reason); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return &models.HistoryEntry{
+		ID:         int(id),
+		Timestamp:  now,
+		Directory:  directory,
+		Operations: ops,
+		FilesCount: len(ops),
+		Status:     "Complete",
+	}, nil
+}
+
+// ListHistory reads all history entries from SQLite
+func (s *Store) ListHistory() ([]models.HistoryEntry, error) {
+	rows, err := s.db.Query("SELECT id, timestamp, directory, files_count, status FROM history_entries ORDER BY id ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []models.HistoryEntry
+	for rows.Next() {
+		var e models.HistoryEntry
+		var ts int64
+		if err := rows.Scan(&e.ID, &ts, &e.Directory, &e.FilesCount, &e.Status); err == nil {
+			e.Timestamp = time.Unix(ts, 0)
+			list = append(list, e)
+		}
+	}
+
+	return list, nil
+}
+
+// GetHistoryEntry retrieves entry and its individual operations
+func (s *Store) GetHistoryEntry(id int) (*models.HistoryEntry, error) {
+	var e models.HistoryEntry
+	var ts int64
+	err := s.db.QueryRow("SELECT id, timestamp, directory, files_count, status FROM history_entries WHERE id = ?", id).
+		Scan(&e.ID, &ts, &e.Directory, &e.FilesCount, &e.Status)
+	if err != nil {
+		return nil, err
+	}
+	e.Timestamp = time.Unix(ts, 0)
+
+	rows, err := s.db.Query("SELECT original_source, destination, reason FROM history_operations WHERE entry_id = ?", id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var op models.HistoryOperation
+		if err := rows.Scan(&op.OriginalSource, &op.Destination, &op.Reason); err == nil {
+			e.Operations = append(e.Operations, op)
+		}
+	}
+
+	return &e, nil
+}
+
+// MarkHistoryUndone updates history entry status to Undone
+func (s *Store) MarkHistoryUndone(id int) error {
+	_, err := s.db.Exec("UPDATE history_entries SET status = 'Undone' WHERE id = ?", id)
+	return err
 }
 
 // IndexDirectory scans a target folder and updates index

@@ -24,7 +24,7 @@ type Manager struct {
 	mu       sync.Mutex
 }
 
-// DefaultManager creates manager targeting ~/.chest/history.json
+// DefaultManager creates manager targeting ~/.chest/history.json and ~/.chest/index.db
 func DefaultManager() (*Manager, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
