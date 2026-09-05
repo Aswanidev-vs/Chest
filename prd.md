@@ -1835,7 +1835,7 @@ The foundation of CHEST.
 - Windows support
 - Linux support
 - macOS support
-
+- search support
 ### Goal
 
 A user can safely organize a directory, preview the plan before execution, and undo completed operations.

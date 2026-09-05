@@ -1,30 +1,9 @@
 # CHEST
 
-```text
-                   [#]
-                       [#]
-                 [#]     [#]
+<center>
+<img src="assests/image.png" alt="chest">
+</center>
 
-           +-------------------+
-          /                   /|
-         /                   / |
-        +-------------------+  |
-        |   \           /   |  |
-        |    \  [===]  /    |  |
-        |     \_______/     |  |
-        +-------------------+  |
-        |                   |  /
-        |                   | /
-        +-------------------+/
-
-        ____  _   _  _____  ____  _____ 
-       / ___|| | | || ____|/ ___||_   _|
-      | |    | |_| ||  _|  \___ \  | |  
-      | |___ |  _  || |___  ___) | | |  
-       \____||_| |_||_____||____/  |_|  
-
-             ORGANIZE YOUR WORLD
-```
 
 > **Give CHEST a folder, tell it how you want the files organized, and CHEST puts them into the right compartments.**
 
