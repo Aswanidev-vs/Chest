@@ -391,52 +391,62 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 
 	// For candidate sizes, compute hash if missing
 	for _, sz := range candidateSizes {
+		var unhashedPaths []string
 		unhashed, err := s.db.Query("SELECT path FROM files WHERE size = ? AND (hash IS NULL OR hash = '')", sz)
-		if err != nil {
-			continue
-		}
-		for unhashed.Next() {
-			var p string
-			if err := unhashed.Scan(&p); err == nil {
-				if h, err := hashFile(p); err == nil {
-					_, _ = s.db.Exec("UPDATE files SET hash = ? WHERE path = ?", h, p)
+		if err == nil {
+			for unhashed.Next() {
+				var p string
+				if err := unhashed.Scan(&p); err == nil {
+					unhashedPaths = append(unhashedPaths, p)
 				}
 			}
+			unhashed.Close()
 		}
-		unhashed.Close()
+
+		for _, p := range unhashedPaths {
+			if h, err := hashFile(p); err == nil {
+				_, _ = s.db.Exec("UPDATE files SET hash = ? WHERE path = ?", h, p)
+			}
+		}
 	}
 
 	// Query groups where hash is identical and occurs > 1 times
+	type hashGroupInfo struct {
+		hash  string
+		count int
+		size  int64
+	}
+	var hashInfos []hashGroupInfo
+
 	hashRows, err := s.db.Query("SELECT hash, COUNT(*), size FROM files WHERE hash != '' GROUP BY hash HAVING COUNT(*) > 1")
 	if err != nil {
 		return nil, err
 	}
-	defer hashRows.Close()
+	for hashRows.Next() {
+		var hgi hashGroupInfo
+		if err := hashRows.Scan(&hgi.hash, &hgi.count, &hgi.size); err == nil {
+			hashInfos = append(hashInfos, hgi)
+		}
+	}
+	hashRows.Close()
 
 	var groups []DuplicateGroup
-	for hashRows.Next() {
-		var hash string
-		var count int
-		var size int64
-		if err := hashRows.Scan(&hash, &count, &size); err != nil {
-			continue
-		}
-
+	for _, hgi := range hashInfos {
 		g := DuplicateGroup{
-			Hash:       hash,
-			Size:       size,
-			WastedSize: size * int64(count-1),
+			Hash:       hgi.hash,
+			Size:       hgi.size,
+			WastedSize: hgi.size * int64(hgi.count-1),
 		}
 
-		fileRows, err := s.db.Query("SELECT path, rel_path, name, extension, mod_time, category FROM files WHERE hash = ?", hash)
+		fileRows, err := s.db.Query("SELECT path, rel_path, name, extension, mod_time, category FROM files WHERE hash = ?", hgi.hash)
 		if err != nil {
 			continue
 		}
 		for fileRows.Next() {
 			var f IndexedFile
 			var modUnix int64
-			f.Size = size
-			f.Hash = hash
+			f.Size = hgi.size
+			f.Hash = hgi.hash
 			if err := fileRows.Scan(&f.Path, &f.RelPath, &f.Name, &f.Extension, &modUnix, &f.Category); err == nil {
 				f.ModTime = time.Unix(modUnix, 0)
 				g.Files = append(g.Files, f)

@@ -88,4 +88,3 @@ See the interactive documentation and step-by-step guide in [docs/](file:///e:/C
 
 ## 📄 License
 
-MIT License. Crafted with ❤️ for clean filesystems.
