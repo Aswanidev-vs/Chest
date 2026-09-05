@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -170,7 +172,49 @@ func (m *Manager) Undo(targetID int) (*models.HistoryEntry, int, error) {
 		restoredCount++
 	}
 
-	// 3. Mark status as Undone
+	// 3. Clean up empty destination directories left behind up to the target root directory
+	absRoot, errRoot := filepath.Abs(entry.Directory)
+	if errRoot != nil {
+		absRoot = filepath.Clean(entry.Directory)
+	}
+
+	dirsToClean := make(map[string]bool)
+	for _, op := range entry.Operations {
+		absDest, errDest := filepath.Abs(op.Destination)
+		if errDest != nil {
+			absDest = filepath.Clean(op.Destination)
+		}
+		dir := filepath.Dir(absDest)
+		for {
+			dirClean := filepath.Clean(dir)
+			rel, errRel := filepath.Rel(absRoot, dirClean)
+			if errRel != nil || rel == "." || strings.HasPrefix(rel, "..") {
+				break
+			}
+			dirsToClean[dirClean] = true
+			parent := filepath.Dir(dirClean)
+			if parent == dirClean {
+				break
+			}
+			dir = parent
+		}
+	}
+
+	// Sort deepest directories first so child empty folders are deleted before parent folders
+	var sortedDirs []string
+	for d := range dirsToClean {
+		sortedDirs = append(sortedDirs, d)
+	}
+	sort.Slice(sortedDirs, func(i, j int) bool {
+		return len(sortedDirs[i]) > len(sortedDirs[j])
+	})
+
+	for _, d := range sortedDirs {
+		// os.Remove only succeeds if directory is completely empty
+		_ = os.Remove(d)
+	}
+
+	// 4. Mark status as Undone
 	entry.Status = "Undone"
 	if err := m.save(store); err != nil {
 		return entry, restoredCount, fmt.Errorf("files restored, but failed updating history status: %w", err)

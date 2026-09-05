@@ -49,7 +49,7 @@ Supports dry-run preview and automatic creation of destination folders.`,
 		Options: []string{
 			"-t, --type           Sort files into category folders (Images, Videos, Documents...)",
 			"-f, --format         Sort files into folders by extension (png, pdf, mp4...)",
-			"-s, --size           Sort files by size thresholds (Small, Medium, Large, Huge)",
+			"-s, --size           Sort files by size thresholds (Tiny, Small, Medium, Large, Huge)",
 			"-d, --date           Sort files by modification year/month (YYYY/MM)",
 			"-p, --preset <name>  Apply built-in preset (downloads, media, developer, documents, photos)",
 			"-r, --rule <spec>    Custom rule on the fly (e.g. 'type=video && size>1GB -> Videos/Large')",

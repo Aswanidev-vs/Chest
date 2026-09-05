@@ -118,23 +118,37 @@ func newSortCmd() *cobra.Command {
 			if f.bySize {
 				ruleList = append(ruleList,
 					models.Rule{
-						Name:        "Large Files (>1GB)",
+						Name:        "Huge Files (>1GB)",
 						Priority:    25,
-						Destination: "Large Files",
+						Destination: "Huge Files",
 						MinSize:     "1GB",
 					},
 					models.Rule{
-						Name:        "Medium Files (100MB-1GB)",
+						Name:        "Large Files (100MB-1GB)",
 						Priority:    24,
-						Destination: "Medium Files",
+						Destination: "Large Files",
 						MinSize:     "100MB",
 						MaxSize:     "1GB",
 					},
 					models.Rule{
-						Name:        "Small Files (<100MB)",
+						Name:        "Medium Files (10MB-100MB)",
 						Priority:    23,
-						Destination: "Small Files",
+						Destination: "Medium Files",
+						MinSize:     "10MB",
 						MaxSize:     "100MB",
+					},
+					models.Rule{
+						Name:        "Small Files (1MB-10MB)",
+						Priority:    22,
+						Destination: "Small Files",
+						MinSize:     "1MB",
+						MaxSize:     "10MB",
+					},
+					models.Rule{
+						Name:        "Tiny Files (<1MB)",
+						Priority:    21,
+						Destination: "Tiny Files",
+						MaxSize:     "1MB",
 					},
 				)
 			}
@@ -179,29 +193,6 @@ func newSortCmd() *cobra.Command {
 				}
 			}
 
-			// Dynamic destination handling for {ext}
-			var expandedRules []models.Rule
-			for _, r := range ruleList {
-				if r.Destination == "{ext}" {
-					commonExts := []string{
-						"jpg", "png", "pdf", "mp4", "zip", "txt", "docx", "mp3", "exe",
-					}
-					for _, ext := range commonExts {
-						expandedRules = append(expandedRules, models.Rule{
-							Name:        fmt.Sprintf("Ext: %s", strings.ToUpper(ext)),
-							Priority:    r.Priority,
-							Destination: strings.ToUpper(ext),
-							Conditions: []models.Condition{
-								{Field: models.FieldExtension, Operator: models.OpEqual, Value: ext},
-							},
-						})
-					}
-				} else {
-					expandedRules = append(expandedRules, r)
-				}
-			}
-			ruleList = expandedRules
-
 			// Initialize scanner
 			var exclusions []string
 			if f.exclude != "" {
@@ -223,6 +214,40 @@ func newSortCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("error scanning %s: %w", absTarget, err)
 			}
+
+			// Dynamic destination handling for {ext}
+			var expandedRules []models.Rule
+			for _, r := range ruleList {
+				if r.Destination == "{ext}" {
+					extSet := make(map[string]bool)
+					// Dynamically include every extension found in scanned files
+					for _, file := range files {
+						if file.Extension != "" {
+							extSet[strings.ToLower(file.Extension)] = true
+						}
+					}
+					// Baseline fallback extensions
+					commonExts := []string{
+						"jpg", "jpeg", "png", "gif", "webp", "svg", "pdf", "mp4", "mkv", "avi", "mov", "zip", "tar", "gz", "7z", "rar", "txt", "md", "docx", "xlsx", "pptx", "mp3", "wav", "flac", "aac", "ogg", "exe", "msi", "iso", "json", "xml", "csv", "go", "py", "js", "ts", "html", "css",
+					}
+					for _, ext := range commonExts {
+						extSet[ext] = true
+					}
+					for ext := range extSet {
+						expandedRules = append(expandedRules, models.Rule{
+							Name:        fmt.Sprintf("Ext: %s", strings.ToUpper(ext)),
+							Priority:    r.Priority,
+							Destination: strings.ToUpper(ext),
+							Conditions: []models.Condition{
+								{Field: models.FieldExtension, Operator: models.OpEqual, Value: ext},
+							},
+						})
+					}
+				} else {
+					expandedRules = append(expandedRules, r)
+				}
+			}
+			ruleList = expandedRules
 
 			engine := rules.NewEngine(ruleList)
 			pl := planner.New(engine, f.into, collisionPolicy)

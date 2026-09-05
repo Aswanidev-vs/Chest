@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/Aswanidev-vs/chest/internal/filesystem"
 	"github.com/Aswanidev-vs/chest/internal/models"
@@ -48,8 +49,15 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 
 		// Calculate destination folder
 		destDir := rule.Destination
+		if strings.Contains(destDir, "{ext}") {
+			extName := strings.ToUpper(file.Extension)
+			if extName == "" {
+				extName = "NO_EXT"
+			}
+			destDir = strings.ReplaceAll(destDir, "{ext}", extName)
+		}
 		if p.baseDestination != "" {
-			destDir = filepath.Join(p.baseDestination, rule.Destination)
+			destDir = filepath.Join(p.baseDestination, destDir)
 		}
 
 		// Absolute or root-relative destination
