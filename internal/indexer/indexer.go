@@ -75,6 +75,11 @@ func OpenOrCreate(customPath ...string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(1)
+
+	// Enable WAL and busy timeout safely across platforms
+	_, _ = db.Exec("PRAGMA journal_mode=WAL;")
+	_, _ = db.Exec("PRAGMA busy_timeout=5000;")
 
 	schema := `
 	CREATE TABLE IF NOT EXISTS files (
