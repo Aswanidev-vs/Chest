@@ -8,8 +8,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "chest",
-	Short: "CHEST — Lightweight file organization tool inspired by Minecraft",
+	Use:     "chest",
+	Version: Version,
+	Short:   "CHEST — Lightweight file organization tool inspired by Minecraft",
 	Run: func(cmd *cobra.Command, args []string) {
 		_ = cmd.Help()
 	},
@@ -37,4 +38,5 @@ func init() {
 	rootCmd.AddCommand(newDuplicatesCmd())
 	rootCmd.AddCommand(newAnalyzeCmd())
 	rootCmd.AddCommand(newCleanCmd())
+	rootCmd.AddCommand(newVersionCmd())
 }

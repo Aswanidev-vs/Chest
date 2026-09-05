@@ -1,171 +1,91 @@
 # CHEST
 
 <center>
-<img src="assests/image.png" alt="chest">
+<img src="assests/image.png" alt="chest" width="360">
 </center>
-
 
 > **Give CHEST a folder, tell it how you want the files organized, and CHEST puts them into the right compartments.**
 
-CHEST is a fast, safe, cross-platform file organization tool inspired by the Minecraft chest.
+CHEST is a high-speed, safe, cross-platform file organization, indexing, and automation CLI tool inspired by the Minecraft chest.
 
 ---
 
-## Features
+## 🚀 Installation
 
-- ⚡ **Lightweight & Fast**: Built with Go, works completely offline, zero heavy runtime dependencies.
-- 📦 **Simple by Default**: Run `chest sort` to quickly organize messy downloads or desktop folders.
-- 🛡️ **Safe & Predictable**:
-  - `chest sort --dry-run` to preview operations before moving a single file.
-  - Interactive confirmation prompt before executing moves.
-  - `chest history` and `chest undo` to restore files to their exact previous locations.
-  - Collision management (`skip`, `rename`, `replace`, `abort`).
-- 🎯 **Powerful Rule Engine**:
-  - Filter by file format (`-f`), file type (`-t`), file size (`-s`), and modification date (`-d`).
-  - Custom rules directly from CLI (`--rule "type=video && size>1GB -> Videos/Large"`).
-  - Priority-based deterministic rule evaluation.
-- 🗂️ **Built-in Presets**:
-  - `downloads`, `media`, `documents`, `developer`, `photos`.
-- 📁 **Smart Folder Management**:
-  - Automatically creates missing parent and destination directories (`--into "Folder/Sub"`).
-  - Support for recursive sorting (`-r`), exclusions (`-x`), and hidden files (`--hidden`).
+### Option 1: Go Install (Recommended for Go users)
+```bash
+go install github.com/Aswanidev-vs/chest/cmd/chest@latest
+```
+Ensure `$GOPATH/bin` (or `%USERPROFILE%\go\bin` on Windows) is in your system `PATH`.
 
----
+### Option 2: Curl / Shell Script (Linux & macOS)
+```bash
+curl -sSL https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.sh | bash
+```
 
-## Installation
+### Option 3: PowerShell (Windows)
+```powershell
+irm https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.ps1 | iex
+```
 
-### Prerequisites
-- [Go 1.22+](https://golang.org/dl/)
-
-### Build from source
+### Option 4: Build from Source
 ```bash
 git clone https://github.com/Aswanidev-vs/chest.git
 cd chest
-go build -o chest.exe ./cmd/chest
+make build
 ```
 
 ---
 
-## Quick Start
+## 📦 Features & Capabilities
 
-### 1. Basic Sorting
-Organize the current directory using the default preset:
-```bash
-chest sort
-```
-
-Organize a specific folder:
-```bash
-chest sort ~/Downloads
-```
-
-### 2. Preview First (Dry Run)
-Inspect what CHEST plans to move without making any changes:
-```bash
-chest sort -n
-# or
-chest sort --dry-run
-```
-
-### 3. Undo Any Operation
-List previous organization runs:
-```bash
-chest history
-```
-
-Revert the most recent operation:
-```bash
-chest undo
-```
-
-Revert a specific operation by ID:
-```bash
-chest undo 42
-```
+- ⚡ **Ultra-Fast Parallel Search**: Built on `fastwalk` (parallel multi-core directory traversal) & `fzf/src/algo` (zero-allocation fuzzy scoring). Includes regex, extension/type filtering, and content grep.
+- 📦 **Simple by Default**: Just run `chest sort` to clean messy Downloads or Desktop folders with zero config.
+- 🛡️ **Safe & Reversible**:
+  - `chest sort --dry-run` (`-n`) previews every filesystem change without touching your files.
+  - Interactive confirmation prompt before executing moves.
+  - `chest undo [id]` restores files back to their exact original positions.
+  - Collision management: `skip`, `rename`, `replace`, `abort`.
+- 👁️ **Continuous Watch Mode (`chest watch`)**: Monitors incoming files in real-time using `fsnotify` and auto-sorts them on the fly.
+- 🔌 **Process-Isolated Plugin Architecture**: Extend CHEST with custom classifiers and rules via `hashicorp/go-plugin` without rebuilding the core.
+- 🧠 **Local File Intelligence & SQLite Index**:
+  - `chest index` stores file metadata and optional SHA256 hashes incrementally into pure-Go SQLite (`ncruces/go-sqlite3`).
+  - `chest stats` provides instant category and storage distribution analytics.
+  - `chest duplicates` finds byte-for-byte identical duplicates via cryptographic hashing.
+  - `chest analyze` reports storage consumers, old/stale files, and wasted space.
+  - `chest clean` / `chest index --clear` clears cached database records safely anytime.
 
 ---
 
-## Common Usage Examples
+## 🛠️ Complete CLI Command Reference
 
-### Sort by File Type
-Groups files into `Images`, `Videos`, `Audio`, `Documents`, `Archives`, `Code`, etc.:
-```bash
-chest sort -t
-```
-
-### Sort into a Custom Folder
-```bash
-chest sort -t --into "Organized"
-```
-
-### Sort by File Size
-Sorts into `Small Files (<100MB)`, `Medium Files (100MB-1GB)`, and `Large Files (>1GB)`:
-```bash
-chest sort -s
-```
-
-### Using Built-in Presets
-List available presets:
-```bash
-chest preset
-```
-Apply a preset:
-```bash
-chest sort -p media
-chest sort -p developer
-chest sort -p documents
-```
-
-### Custom Rules
-```bash
-chest sort --rule "type=video && size>1GB -> Videos/Large"
-chest sort --rule "*.mp4 -> Videos" --rule "*.pdf -> Documents"
-```
-
-### Recursive Scan with Exclusions
-```bash
-chest sort -r -x ".git,node_modules,build"
-```
-
-### Automation (Skip Confirmation)
-```bash
-chest sort -p downloads -y
-```
-
----
-
-## CLI Flags Reference
-
-| Flag | Long Form | Description |
+| Command | Purpose | Example |
 |---|---|---|
-| `-t` | `--type` | Sort by file type category |
-| `-f` | `--format` | Sort by file extension / format |
-| `-s` | `--size` | Sort by file size |
-| `-d` | `--date` | Sort by modification date |
-| `-i` | `--into <dir>` | Destination base directory |
-| `-p` | `--preset <name>` | Use preset (`downloads`, `media`, `documents`, `developer`, `photos`) |
-| `-n` | `--dry-run` | Preview changes without modifying filesystem |
-| `-y` | `--yes` | Skip confirmation prompt (ideal for scripts) |
-| `-r` | `--recursive` | Traverse subdirectories |
-| `-v` | `--verbose` | Detailed step-by-step output |
-| `-q` | `--quiet` | Minimal output |
-| `-x` | `--exclude <pat>` | Exclude files/directories (comma-separated or pattern) |
-| | `--hidden` | Include hidden and system files |
-| | `--rule <rule>` | Define custom sorting rule |
-| | `--collision <mode>` | Collision policy: `skip` (default), `rename`, `replace`, `abort` |
-| | `--follow-symlinks` | Follow symbolic links |
+| `chest sort` | Organize files in current or target folder | `chest sort ~/Downloads -t -p downloads` |
+| `chest search` | Fast concurrent fuzzy & content grep search | `chest search "report" -e pdf -c "invoice"` |
+| `chest watch` | Real-time continuous folder automation | `chest watch ~/Downloads --preset media` |
+| `chest history` | View previous file organization runs | `chest history` |
+| `chest undo` | Revert latest or specific operation by ID | `chest undo` or `chest undo 4` |
+| `chest index` | Index directory into SQLite index DB | `chest index ~/Documents --hash` |
+| `chest index --clear` | Empty cached index records | `chest index --clear` |
+| `chest stats` | Show category breakdowns & largest files | `chest stats` |
+| `chest duplicates` | Scan and group duplicate files by hash | `chest duplicates ~/Downloads` |
+| `chest analyze` | Read-only storage health & intelligence report | `chest analyze ~/Downloads` |
+| `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |
+| `chest clean` | Remove cached index data (`--all` deletes DB file) | `chest clean --all` |
+| `chest preset` | List available built-in rule presets | `chest preset` |
+| `chest version` | Print CLI version and architecture | `chest version` |
 
 ---
 
-## Testing
+## 🎮 Plugin Development & Extension
 
-Run the test suite:
-```bash
-go test -v ./...
-```
+CHEST plugins are standalone binaries communicating over standard RPC using `hashicorp/go-plugin`.
+
+See the interactive documentation and step-by-step guide in [docs/](file:///e:/Chest/docs/index.html) or visit the [Plugin Guide](file:///e:/Chest/docs/documentation.html).
 
 ---
 
-## License
+## 📄 License
 
-MIT License.
+MIT License. Crafted with ❤️ for clean filesystems.

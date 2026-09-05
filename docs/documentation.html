@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Documentation & Plugin Architecture — CHEST</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="brand">
+      <a href="index.html" style="display: flex; align-items: center; gap: 0.75rem; color: #fff;">
+        <img src="../assests/image.png" alt="CHEST logo" class="brand-icon" onerror="this.style.display='none'">
+        <span>CHEST DOCS</span>
+      </a>
+    </div>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">← Back to Home</a>
+      <a href="#quickstart" class="nav-link">Quickstart</a>
+      <a href="#cli-reference" class="nav-link">Commands</a>
+      <a href="#plugin-guide" class="nav-link btn-doc">Plugin Guide</a>
+    </div>
+  </nav>
+
+  <div class="docs-container">
+    <!-- Sidebar -->
+    <aside class="docs-sidebar">
+      <div class="sidebar-group">
+        <div class="sidebar-title">Getting Started</div>
+        <ul class="sidebar-links">
+          <li><a href="#installation" class="active">Installation</a></li>
+          <li><a href="#quickstart">Quick Start</a></li>
+          <li><a href="#architecture">Architecture</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-title">CLI Commands</div>
+        <ul class="sidebar-links">
+          <li><a href="#cmd-sort">chest sort</a></li>
+          <li><a href="#cmd-search">chest search</a></li>
+          <li><a href="#cmd-watch">chest watch</a></li>
+          <li><a href="#cmd-undo">chest undo & history</a></li>
+          <li><a href="#cmd-index">chest index & clean</a></li>
+          <li><a href="#cmd-intel">chest stats, duplicates & analyze</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-title">Extending CHEST</div>
+        <ul class="sidebar-links">
+          <li><a href="#plugin-overview">Plugin System Overview</a></li>
+          <li><a href="#plugin-walkthrough">Building a Plugin (Example)</a></li>
+          <li><a href="#plugin-manifest">manifest.json Spec</a></li>
+          <li><a href="#plugin-cli">Installing & Managing</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="docs-content">
+      <h1>CHEST Documentation</h1>
+      <p>CHEST is designed as a standalone, offline-first, highly concurrent file organization and storage intelligence tool written in Go.</p>
+
+      <!-- Installation -->
+      <section id="installation">
+        <h2>Installation Methods</h2>
+
+        <h3>1. Go Install</h3>
+        <p>If you have Go installed, compile directly into your Go bin directory:</p>
+        <div class="code-block">go install github.com/Aswanidev-vs/chest/cmd/chest@latest</div>
+
+        <h3>2. Curl One-Liner (macOS & Linux)</h3>
+        <p>Automated installer script:</p>
+        <div class="code-block">curl -sSL https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.sh | bash</div>
+
+        <h3>3. Windows PowerShell</h3>
+        <p>Run within PowerShell terminal:</p>
+        <div class="code-block">irm https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.ps1 | iex</div>
+      </section>
+
+      <!-- Quickstart -->
+      <section id="quickstart">
+        <h2>Quick Start</h2>
+        <p>Sort files in your current folder using the default rules:</p>
+        <div class="code-block">chest sort</div>
+
+        <p>Safe preview with dry run:</p>
+        <div class="code-block">chest sort ~/Downloads --dry-run</div>
+
+        <p>Revert what was just sorted:</p>
+        <div class="code-block">chest undo</div>
+      </section>
+
+      <!-- CLI Reference -->
+      <section id="cli-reference">
+        <h2>Core CLI Commands</h2>
+
+        <h3 id="cmd-sort"><code>chest sort [target] [flags]</code></h3>
+        <p>Organizes files based on rules or presets.</p>
+        <ul>
+          <li><code>-t, --type</code>: Group by file category (Images, Videos, Documents, etc.)</li>
+          <li><code>-s, --size</code>: Group by size thresholds</li>
+          <li><code>-f, --format</code>: Group by file extension</li>
+          <li><code>-p, --preset &lt;name&gt;</code>: Use a built-in preset (<code>downloads</code>, <code>media</code>, <code>developer</code>, <code>documents</code>, <code>photos</code>)</li>
+          <li><code>--rule "expression -&gt; Destination"</code>: Specify on-the-fly custom rules</li>
+          <li><code>-i, --into &lt;folder&gt;</code>: Custom root destination directory</li>
+          <li><code>-n, --dry-run</code>: Simulate changes without moving files</li>
+          <li><code>-y, --yes</code>: Skip interactive confirmation prompt</li>
+        </ul>
+
+        <h3 id="cmd-search"><code>chest search [pattern] [path] [flags]</code></h3>
+        <p>Blazing fast search using <code>fastwalk</code> parallel multi-core traversal and <code>fzf/src/algo</code> scoring.</p>
+        <ul>
+          <li><code>-c, --content &lt;query&gt;</code>: Grep inside file contents (shows line number and match snippet)</li>
+          <li><code>-t, --type &lt;category&gt;</code>: Filter by category (e.g. <code>image</code>, <code>code</code>)</li>
+          <li><code>-e, --ext &lt;exts&gt;</code>: Comma-separated extension filter (e.g. <code>go,md,png</code>)</li>
+          <li><code>-s, --size &lt;cond&gt;</code>: Size condition (e.g. <code>&gt;1GB</code>, <code>&lt;50MB</code>)</li>
+          <li><code>-m, --modified &lt;cond&gt;</code>: Time condition (e.g. <code>&gt;30d</code>)</li>
+          <li><code>-r, --regex</code>: Regex pattern matching</li>
+          <li><code>-j, --json</code>: Output results as JSON for shell scripting</li>
+        </ul>
+
+        <h3 id="cmd-watch"><code>chest watch [directory] [flags]</code></h3>
+        <p>Continuous automated watcher powered by <code>fsnotify</code>. When files finish downloading or are saved, CHEST immediately sorts them into compartments.</p>
+        <div class="code-block">chest watch ~/Downloads --preset media --debounce 500ms</div>
+
+        <h3 id="cmd-index"><code>chest index &amp; chest clean</code></h3>
+        <p>CHEST indexer persists file metadata and optional SHA256 hashes into local SQLite (<code>~/.chest/index.db</code>).</p>
+        <ul>
+          <li><code>chest index [path] --hash</code>: Compute incremental SHA256 hashes</li>
+          <li><code>chest index --clear</code>: Empty the indexed files table without deleting undo history</li>
+          <li><code>chest clean</code>: Empties index cache</li>
+          <li><code>chest clean --all</code>: Deletes the entire SQLite database file</li>
+        </ul>
+
+        <h3 id="cmd-intel">File Intelligence: <code>stats</code>, <code>duplicates</code>, <code>analyze</code></h3>
+        <ul>
+          <li><code>chest stats</code>: Instant storage and category distribution breakdown</li>
+          <li><code>chest duplicates [path]</code>: Byte-for-byte duplicate finder using cryptographic hashes</li>
+          <li><code>chest analyze [path]</code>: Health report identifying stale files (>180 days), zero-byte files, and largest consumers</li>
+        </ul>
+      </section>
+
+      <!-- Plugin Guide -->
+      <section id="plugin-guide">
+        <h2>🔌 Plugin Architecture & Guide</h2>
+        <div class="callout tip">
+          <strong>Why external plugins?</strong> CHEST uses <code>hashicorp/go-plugin</code> over RPC. Plugins run in separate processes. If a plugin crashes or has bugs, CHEST's planning and filesystem safety mechanisms remain 100% protected.
+        </div>
+
+        <h3 id="plugin-overview">How Plugins Work</h3>
+        <p>A CHEST plugin is simply an executable binary paired with a <code>manifest.json</code> placed in <code>~/.chest/plugins/&lt;plugin-name&gt;/</code>.</p>
+        <p>Plugins can expose custom classifiers, custom rules, or new file presets.</p>
+
+        <h3 id="plugin-walkthrough">Building a Plugin: Step-by-Step Tutorial</h3>
+
+        <h4>Step 1: Create your plugin project directory</h4>
+        <div class="code-block">mkdir chest-anime-plugin
+cd chest-anime-plugin
+go mod init chest-anime-plugin</div>
+
+        <h4>Step 2: Write your plugin binary (<code>main.go</code>)</h4>
+        <div class="code-block">package main
+
+import (
+	"strings"
+	hplugin "github.com/hashicorp/go-plugin"
+	"github.com/Aswanidev-vs/chest/internal/plugin"
+	"github.com/Aswanidev-vs/chest/internal/models"
+)
+
+type AnimePlugin struct{}
+
+func (a *AnimePlugin) GetInfo() (plugin.Manifest, error) {
+	return plugin.Manifest{
+		Name:         "anime",
+		Version:      "1.0.0",
+		Description:  "Classifies anime and manga media",
+		Capabilities: []string{"classifier"},
+		Binary:       "anime-plugin",
+	}, nil
+}
+
+func (a *AnimePlugin) Classify(filename string, ext string) (string, error) {
+	lower := strings.ToLower(filename)
+	if strings.Contains(lower, "[subs]") || strings.Contains(lower, "1080p") {
+		return "Anime", nil
+	}
+	if ext == "cbr" || ext == "cbz" {
+		return "Manga", nil
+	}
+	return "Other", nil
+}
+
+func (a *AnimePlugin) GetCustomRules() ([]models.Rule, error) {
+	return nil, nil
+}
+
+func main() {
+	hplugin.Serve(&hplugin.ServeConfig{
+		HandshakeConfig: plugin.HandshakeConfig,
+		Plugins: map[string]hplugin.Plugin{
+			"classifier": &plugin.ClassifierPluginRPC{Impl: &AnimePlugin{}},
+		},
+	})
+}</div>
+
+        <h4>Step 3: Create <code>manifest.json</code></h4>
+        <div class="code-block">{
+  "name": "anime",
+  "version": "1.0.0",
+  "description": "Classifies anime and manga media",
+  "author": "YourName",
+  "capabilities": ["classifier"],
+  "binary": "anime-plugin"
+}</div>
+
+        <h4>Step 4: Build and Install</h4>
+        <div class="code-block">go build -o anime-plugin .
+# Install into CHEST
+chest plugin install .</div>
+
+        <h4>Step 5: Verify</h4>
+        <div class="code-block">chest plugin list
+chest plugin info anime</div>
+
+        <h3 id="plugin-cli">Managing Plugins via CLI</h3>
+        <ul>
+          <li><code>chest plugin list</code>: Show all installed plugins</li>
+          <li><code>chest plugin info &lt;name&gt;</code>: View detailed capabilities and author info</li>
+          <li><code>chest plugin install &lt;directory&gt;</code>: Installs a local plugin folder</li>
+          <li><code>chest plugin remove &lt;name&gt;</code>: Completely uninstalls the plugin</li>
+        </ul>
+      </section>
+
+      <footer>
+        <p>© 2026 CHEST Project. Released under the MIT License.</p>
+      </footer>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

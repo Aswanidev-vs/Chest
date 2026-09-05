@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CHEST — Ultra-Fast File Organization & Intelligence Tool</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="brand">
+      <img src="../assests/image.png" alt="CHEST logo" class="brand-icon" onerror="this.style.display='none'">
+      <span>CHEST</span>
+    </div>
+    <div class="nav-links">
+      <a href="#features" class="nav-link">Features</a>
+      <a href="#install" class="nav-link">Install</a>
+      <a href="#commands" class="nav-link">Commands</a>
+      <a href="documentation.html" class="nav-link btn-doc">Documentation & Plugins →</a>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <header class="hero">
+    <div class="badge">Inspired by the Minecraft Chest • Built with Pure Go</div>
+    <h1>Sort • Index • Find • Automate</h1>
+    <p>Give CHEST a folder, tell it how you want files organized, and CHEST puts them into the right compartments with blazing speed and safety.</p>
+
+    <div class="hero-actions">
+      <a href="documentation.html" class="btn-primary">Read the Docs</a>
+      <a href="#install" class="btn-secondary">Install Now</a>
+    </div>
+
+    <!-- Terminal Mockup -->
+    <div class="terminal-window">
+      <div class="terminal-header">
+        <div class="terminal-dots">
+          <div class="dot dot-red"></div>
+          <div class="dot dot-yellow"></div>
+          <div class="dot dot-green"></div>
+        </div>
+        <div class="terminal-title">bash — chest v1.0.0</div>
+      </div>
+      <div class="terminal-body">
+        <span class="prompt-char">$</span> chest sort ~/Downloads -p downloads --dry-run<br>
+        <span class="t-gold">CHEST PLAN</span><br>
+        &nbsp;&nbsp;anime_ep01.mkv <span class="t-dim">→</span> <span class="t-green">Downloads/Videos/</span><br>
+        &nbsp;&nbsp;profile_shot.png <span class="t-dim">→</span> <span class="t-green">Downloads/Images/</span><br>
+        &nbsp;&nbsp;q3_financial_report.pdf <span class="t-dim">→</span> <span class="t-green">Downloads/Documents/</span><br>
+        <span class="t-cyan">3 files would be moved. No changes made (Dry Run).</span><br><br>
+        <span class="prompt-char">$</span> chest search "report" -e pdf -c "Q3"<br>
+        Found <span class="t-green">1</span> match in ~/Downloads<br>
+        &nbsp;&nbsp;[DOCUMENTS] q3_financial_report.pdf (1.2 MB)<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;L14: Revenue Growth in Q3: +28%
+      </div>
+    </div>
+  </header>
+
+  <!-- Key Features Grid -->
+  <section class="features-section" id="features">
+    <div class="section-heading">
+      <h2>Why Developers Choose CHEST</h2>
+      <p>Modern architecture engineered for speed, reliability, and modularity.</p>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>High-Speed Concurrency</h3>
+        <p>Parallel directory traversal powered by <code>fastwalk</code> and microsecond scoring with <code>fzf/src/algo</code>. Processes 100k+ files across multiple CPU cores.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3>100% Reversible & Safe</h3>
+        <p>Dry-run mode, collision detection (skip, rename, replace, abort), and instantaneous rollbacks via <code>chest undo</code>.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">👁️</div>
+        <h3>Real-Time Watch Mode</h3>
+        <p>Continuous filesystem event watching with <code>chest watch</code>. Automatically detects new downloads or dropped assets and sorts them immediately.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <h3>Local SQLite Intelligence</h3>
+        <p>Stores metadata, storage statistics, and cryptographic SHA256 hashes inside pure-Go SQLite. Detect byte-identical duplicates with zero cloud exposure.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🔌</div>
+        <h3>Process-Isolated Plugins</h3>
+        <p>Extend CHEST with custom classifiers and rules using HashiCorp's <code>go-plugin</code> over RPC. Your plugins run in independent processes.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <h3>Expressive Rule Engine</h3>
+        <p>Combine type, size, extension, regex, MIME type, and dates with boolean expressions like <code>type=image && size>5MB -> RAW/</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Installation Section -->
+  <section class="features-section" id="install">
+    <div class="section-heading">
+      <h2>Instant Installation</h2>
+      <p>Pick the method that matches your environment.</p>
+    </div>
+
+    <div style="max-width: 760px; margin: 0 auto;">
+      <h3 style="margin-bottom: 0.5rem;">Method 1: Go Install (Cross-platform)</h3>
+      <div class="code-block">go install github.com/Aswanidev-vs/chest/cmd/chest@latest</div>
+
+      <h3 style="margin-bottom: 0.5rem;">Method 2: Curl One-Liner (Linux & macOS)</h3>
+      <div class="code-block">curl -sSL https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.sh | bash</div>
+
+      <h3 style="margin-bottom: 0.5rem;">Method 3: PowerShell (Windows)</h3>
+      <div class="code-block">irm https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.ps1 | iex</div>
+
+      <div style="text-align: center; margin-top: 2rem;">
+        <a href="documentation.html" class="btn-primary">Visit Full Documentation & Plugin Guide →</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>© 2026 CHEST Project. Released under the MIT License.</p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
