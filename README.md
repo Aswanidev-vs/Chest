@@ -6,19 +6,19 @@
 
 > **Give CHEST a folder, tell it how you want the files organized, and CHEST puts them into the right compartments.**
 
-CHEST is a high-speed, safe, cross-platform file organization, indexing, and automation CLI tool inspired by the Minecraft chest.
+CHEST is a file organization, indexing, and automation CLI tool built in Go, inspired by the Minecraft chest. It focuses on deterministic sorting, reversible operations, fast searching, and an extensible architecture.
 
 ---
 
-## 🚀 Installation
+## Installation
 
-### Option 1: Go Install (Recommended for Go users)
+### Option 1: Go Install
 ```bash
 go install github.com/Aswanidev-vs/chest/cmd/chest@latest
 ```
-Ensure `$GOPATH/bin` (or `%USERPROFILE%\go\bin` on Windows) is in your system `PATH`.
+Ensure your Go bin path (`$GOPATH/bin` or `%USERPROFILE%\go\bin`) is included in your system `PATH`.
 
-### Option 2: Curl / Shell Script (Linux & macOS)
+### Option 2: Shell Script (Linux & macOS)
 ```bash
 curl -sSL https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.sh | bash
 ```
@@ -37,54 +37,52 @@ make build
 
 ---
 
-## 📦 Features & Capabilities
+## Core Features
 
-- ⚡ **Ultra-Fast Parallel Search**: Built on `fastwalk` (parallel multi-core directory traversal) & `fzf/src/algo` (zero-allocation fuzzy scoring). Includes regex, extension/type filtering, and content grep.
-- 📦 **Simple by Default**: Just run `chest sort` to clean messy Downloads or Desktop folders with zero config.
-- 🛡️ **Safe & Reversible**:
-  - `chest sort --dry-run` (`-n`) previews every filesystem change without touching your files.
-  - Interactive confirmation prompt before executing moves.
-  - `chest undo [id]` restores files back to their exact original positions.
-  - Collision management: `skip`, `rename`, `replace`, `abort`.
-- 👁️ **Continuous Watch Mode (`chest watch`)**: Monitors incoming files in real-time using `fsnotify` and auto-sorts them on the fly.
-- 🔌 **Process-Isolated Plugin Architecture**: Extend CHEST with custom classifiers and rules via `hashicorp/go-plugin` without rebuilding the core.
-- 🧠 **Local File Intelligence & SQLite Index**:
-  - `chest index` stores file metadata and optional SHA256 hashes incrementally into pure-Go SQLite (`ncruces/go-sqlite3`).
-  - `chest stats` provides instant category and storage distribution analytics.
-  - `chest duplicates` finds byte-for-byte identical duplicates via cryptographic hashing.
-  - `chest analyze` reports storage consumers, old/stale files, and wasted space.
-  - `chest clean` / `chest index --clear` clears cached database records safely anytime.
+- **Concurrent Search Engine**: Built using `fastwalk` for parallel directory traversal and `fzf/src/algo` for exact and fuzzy scoring. Supports filtering by file category, extension, size, modification date, and in-file content grep.
+- **Rule-Based Organization**: Sort by extensions, categories, file size boundaries, and dates. Define custom rules on the CLI or use built-in presets (`downloads`, `media`, `documents`, `developer`, `photos`).
+- **Safety First**:
+  - Full dry-run preview (`chest sort --dry-run` or `-n`) before files move.
+  - Interactive confirmations.
+  - Built-in collision policies: `skip`, `rename`, `replace`, or `abort`.
+  - Comprehensive operation logging and rollbacks via `chest undo`.
+- **Folder Watch Automation**: Monitor directories continuously with `chest watch`. New files are picked up via filesystem events (`fsnotify`) and sorted automatically with debounce safeguards.
+- **Local Indexing & Analysis**:
+  - Incremental metadata and SHA256 hashing backed by pure-Go SQLite (`ncruces/go-sqlite3`).
+  - Storage analytics with `chest stats`.
+  - Exact duplicate file detection with `chest duplicates`.
+  - Stale and zero-byte file reports with `chest analyze`.
+  - Cache management with `chest index --clear` and `chest clean`.
+- **Plugin Architecture**: Extend classification and rule handling through independent external processes using `hashicorp/go-plugin` over standard RPC.
 
 ---
 
-## 🛠️ Complete CLI Command Reference
+## Command Reference
 
-| Command | Purpose | Example |
+| Command | Description | Example |
 |---|---|---|
-| `chest sort` | Organize files in current or target folder | `chest sort ~/Downloads -t -p downloads` |
-| `chest search` | Fast concurrent fuzzy & content grep search | `chest search "report" -e pdf -c "invoice"` |
-| `chest watch` | Real-time continuous folder automation | `chest watch ~/Downloads --preset media` |
-| `chest history` | View previous file organization runs | `chest history` |
-| `chest undo` | Revert latest or specific operation by ID | `chest undo` or `chest undo 4` |
-| `chest index` | Index directory into SQLite index DB | `chest index ~/Documents --hash` |
-| `chest index --clear` | Empty cached index records | `chest index --clear` |
-| `chest stats` | Show category breakdowns & largest files | `chest stats` |
-| `chest duplicates` | Scan and group duplicate files by hash | `chest duplicates ~/Downloads` |
-| `chest analyze` | Read-only storage health & intelligence report | `chest analyze ~/Downloads` |
+| `chest sort` | Sort files using presets or custom rules | `chest sort ~/Downloads -t -p downloads` |
+| `chest search` | Search files by name, metadata, or file content | `chest search "report" -e pdf -c "invoice"` |
+| `chest watch` | Continuously watch and organize incoming files | `chest watch ~/Downloads --preset media` |
+| `chest history` | View previous operations log | `chest history` |
+| `chest undo` | Revert the latest operation or a specific run by ID | `chest undo` or `chest undo 3` |
+| `chest index` | Index directory metadata into local SQLite | `chest index ~/Documents --hash` |
+| `chest stats` | Display storage consumption and category breakdown | `chest stats` |
+| `chest duplicates` | Locate duplicate files using cryptographic hashes | `chest duplicates ~/Downloads` |
+| `chest analyze` | Read-only audit of storage distribution and old files | `chest analyze ~/Downloads` |
 | `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |
-| `chest clean` | Remove cached index data (`--all` deletes DB file) | `chest clean --all` |
-| `chest preset` | List available built-in rule presets | `chest preset` |
-| `chest version` | Print CLI version and architecture | `chest version` |
+| `chest clean` | Clear cached SQLite index (`--all` removes database file) | `chest clean --all` |
+| `chest preset` | List available built-in sorting presets | `chest preset` |
+| `chest version` | Display version and build architecture | `chest version` |
 
 ---
 
-## 🎮 Plugin Development & Extension
+## Documentation & Plugin Development
 
-CHEST plugins are standalone binaries communicating over standard RPC using `hashicorp/go-plugin`.
-
-See the interactive documentation and step-by-step guide in [docs/](file:///e:/Chest/docs/index.html) or visit the [Plugin Guide](file:///e:/Chest/docs/documentation.html).
+Comprehensive guides, design details, and instructions on creating custom external plugins are documented in [docs/](docs/index.html) and [docs/documentation.html](docs/documentation.html).
 
 ---
 
-## 📄 License
+## License
 
+MIT License. See [LICENSE](LICENSE) for details.
