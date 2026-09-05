@@ -30,4 +30,5 @@ func init() {
 	rootCmd.AddCommand(newHistoryCmd())
 	rootCmd.AddCommand(newUndoCmd())
 	rootCmd.AddCommand(newPresetCmd())
+	rootCmd.AddCommand(newPluginCmd())
 }
