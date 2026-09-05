@@ -16,6 +16,7 @@ type ScanOptions struct {
 	FollowSymlinks bool
 	Exclusions     []string // Names, patterns, or relative directories to skip
 	IgnoreDirs     []string // Output directories being created by CHEST
+	ClassifyFunc   func(filename, ext string) string // Optional: overrides built-in classifier
 }
 
 // Scanner traverses files in a directory
@@ -101,7 +102,12 @@ func (s *Scanner) Scan(root string) ([]models.File, error) {
 
 		relPath, _ := filepath.Rel(root, path)
 		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
-		cat := classifier.ClassifyExtension(ext)
+		var cat string
+		if s.opts.ClassifyFunc != nil {
+			cat = s.opts.ClassifyFunc(name, ext)
+		} else {
+			cat = classifier.ClassifyExtension(ext)
+		}
 
 		files = append(files, models.File{
 			Path:      path,

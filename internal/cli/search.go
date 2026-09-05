@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Aswanidev-vs/chest/internal/classifier"
+	"github.com/Aswanidev-vs/chest/internal/plugin"
 	"github.com/Aswanidev-vs/chest/internal/search"
 	"github.com/spf13/cobra"
 )
@@ -49,6 +51,29 @@ and content grep (-c).`,
 				rootPath = args[1]
 			}
 
+			// Build composite classifier with plugin fallback
+			var classifyFunc func(string, string) string
+			var pluginCleanup func()
+			if mgr, err := plugin.NewManager(); err == nil {
+				pluginServices, _, cleanup := mgr.LoadAllClassifiers()
+				pluginCleanup = cleanup
+				if len(pluginServices) > 0 {
+					classifyFunc = func(filename, ext string) string {
+						cat := classifier.ClassifyExtension(ext)
+						if cat != classifier.TypeOther && cat != "" {
+							return cat
+						}
+						if pluginCat := plugin.ClassifyWithPlugins(pluginServices, filename, ext); pluginCat != "" {
+							return pluginCat
+						}
+						return cat
+					}
+				}
+			}
+			if pluginCleanup != nil {
+				defer pluginCleanup()
+			}
+
 			engine := search.New(search.SearchOptions{
 				Pattern:       pattern,
 				RootPath:      rootPath,
@@ -63,6 +88,7 @@ and content grep (-c).`,
 				Fuzzy:         fuzzy,
 				IncludeHidden: includeHidden,
 				Limit:         limit,
+				ClassifyFunc:  classifyFunc,
 			})
 
 			matches, err := engine.Search()

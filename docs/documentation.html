@@ -75,7 +75,7 @@
           <ul class="docs-nav-list">
             <li><a class="docs-nav-link" href="#plugin-overview">Plugin Overview</a></li>
             <li><a class="docs-nav-link" href="#plugin-walkthrough">Building a Plugin</a></li>
-            <li><a class="docs-nav-link" href="#plugin-manifest">manifest.json Spec</a></li>
+            <li><a class="docs-nav-link" href="#plugin-manifest">Manifest Spec (JSON / TOML)</a></li>
             <li><a class="docs-nav-link" href="#plugin-management">Plugin CLI Management</a></li>
           </ul>
         </div>
@@ -238,6 +238,11 @@
                 <td>string</td>
                 <td>Override destination root directory.</td>
               </tr>
+              <tr>
+                <td><span class="flag-badge">--allow-system</span></td>
+                <td>boolean</td>
+                <td>Bypass system path protection guard. Required when targeting OS-level directories (e.g. <code>C:\Windows</code>, <code>/usr</code>). Use with extreme caution.</td>
+              </tr>
             </tbody>
           </table>
 
@@ -283,6 +288,33 @@
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">watch</span> <span class="t-path">~/Downloads</span> <span class="t-flag">--preset</span> media <span class="t-flag">--debounce</span> 500ms</code></pre>
           </div>
 
+          <table class="flag-table">
+            <thead>
+              <tr>
+                <th>Flag</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="flag-badge">-p, --preset</span></td>
+                <td>string</td>
+                <td>Rule bundle: <code>downloads</code>, <code>media</code>, <code>developer</code>, <code>documents</code>, <code>photos</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--debounce</span></td>
+                <td>duration</td>
+                <td>Wait interval before sorting a newly created file. Default <code>500ms</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--allow-system</span></td>
+                <td>boolean</td>
+                <td>Bypass system path protection when watching OS-level directories.</td>
+              </tr>
+            </tbody>
+          </table>
+
           <h3 id="cmd-undo">chest undo & history</h3>
           <p>Inspect previous operations or rollback a batch of moves:</p>
           <div class="code-block-wrapper">
@@ -291,6 +323,23 @@
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">undo</span>           <span class="t-comment"># Undo the most recent run</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">undo</span> <span class="t-num">4</span>         <span class="t-comment"># Undo specific transaction by ID</span></code></pre>
           </div>
+
+          <table class="flag-table">
+            <thead>
+              <tr>
+                <th>Flag</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="flag-badge">--allow-system</span></td>
+                <td>boolean</td>
+                <td>Bypass system path guard when undoing into protected OS directories.</td>
+              </tr>
+            </tbody>
+          </table>
 
           <h3 id="cmd-index">chest index & clean</h3>
           <p>Index file paths and hashes into SQLite for fast duplicate discovery:</p>
@@ -332,7 +381,17 @@
           </div>
 
           <h3 id="plugin-overview">Plugin Structure</h3>
-          <p>A plugin consists of an executable binary and a <code>manifest.json</code> placed in <code>~/.chest/plugins/&lt;name&gt;/</code>.</p>
+          <p>A plugin consists of an executable binary and a manifest file (<code>manifest.json</code> or <code>manifest.toml</code>) placed in <code>~/.chest/plugins/&lt;name&gt;/</code>.</p>
+
+          <div class="callout-box">
+            <i data-lucide="shield-alert" style="color: var(--accent-emerald); font-size: 1.4rem; margin-top: 2px;"></i>
+            <div>
+              <strong style="color: var(--text-primary);">System Path Protection</strong>
+              <div style="color: var(--text-secondary); margin-top: 4px;">
+                CHEST automatically blocks destructive operations (<code>sort</code>, <code>watch</code>, <code>undo</code>) targeting system directories like <code>C:\Windows</code>, <code>/usr</code>, <code>/etc</code>, or drive roots. Use <code>--allow-system</code> to override with an interactive confirmation.
+              </div>
+            </div>
+          </div>
 
           <h3 id="plugin-walkthrough">Building a Sample Plugin</h3>
           <h4>1. Initialize project</h4>
@@ -383,7 +442,10 @@
 }</code></pre>
           </div>
 
-          <h4>3. Define manifest.json</h4>
+          <h4 id="plugin-manifest">3. Define manifest (JSON or TOML)</h4>
+          <p>CHEST discovers either <code>manifest.json</code> or <code>manifest.toml</code>. Use whichever you prefer:</p>
+
+          <h5>manifest.json</h5>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
             <pre class="code-block"><code>{
@@ -394,6 +456,17 @@
   <span class="t-json-key">"capabilities"</span>: [<span class="t-str">"classifier"</span>],
   <span class="t-json-key">"binary"</span>: <span class="t-str">"custom-filter"</span>
 }</code></pre>
+          </div>
+
+          <h5>manifest.toml</h5>
+          <div class="code-block-wrapper">
+            <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
+            <pre class="code-block"><code><span class="t-json-key">name</span>          = <span class="t-str">"custom-filter"</span>
+<span class="t-json-key">version</span>       = <span class="t-str">"1.0.0"</span>
+<span class="t-json-key">description</span>   = <span class="t-str">"Classifies custom test files"</span>
+<span class="t-json-key">author</span>        = <span class="t-str">"Developer"</span>
+<span class="t-json-key">capabilities</span>  = [<span class="t-str">"classifier"</span>]
+<span class="t-json-key">binary</span>        = <span class="t-str">"custom-filter"</span></code></pre>
           </div>
 
           <h4>4. Build and install</h4>

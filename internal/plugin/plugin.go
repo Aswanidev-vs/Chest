@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/Aswanidev-vs/chest/internal/models"
+	"github.com/BurntSushi/toml"
 	hplugin "github.com/hashicorp/go-plugin"
 )
 
@@ -26,14 +27,14 @@ var PluginMap = map[string]hplugin.Plugin{
 	"classifier": &ClassifierPluginRPC{},
 }
 
-// Manifest represents plugin metadata stored in manifest.json or returned by plugin
+// Manifest represents plugin metadata stored in manifest.json, manifest.toml, or returned by plugin
 type Manifest struct {
-	Name         string   `json:"name"`
-	Version      string   `json:"version"`
-	Description  string   `json:"description"`
-	Author       string   `json:"author,omitempty"`
-	Capabilities []string `json:"capabilities"` // e.g. ["classifier", "preset", "rule"]
-	Binary       string   `json:"binary"`       // executable filename
+	Name         string   `json:"name" toml:"name"`
+	Version      string   `json:"version" toml:"version"`
+	Description  string   `json:"description" toml:"description"`
+	Author       string   `json:"author,omitempty" toml:"author,omitempty"`
+	Capabilities []string `json:"capabilities" toml:"capabilities"` // e.g. ["classifier", "preset", "rule"]
+	Binary       string   `json:"binary" toml:"binary"`             // executable filename
 }
 
 // ClassifierService is the interface exposed by plugins
@@ -148,7 +149,30 @@ func (m *Manager) GetPluginDir() string {
 	return m.pluginDir
 }
 
-// List installed plugins by reading manifest.json in each plugin folder
+// readManifest tries reading manifest.toml first, then manifest.json
+func readManifest(dir string) (*Manifest, error) {
+	// Try manifest.toml first
+	tomlPath := filepath.Join(dir, "manifest.toml")
+	if data, err := os.ReadFile(tomlPath); err == nil {
+		var mf Manifest
+		if err := toml.Unmarshal(data, &mf); err == nil {
+			return &mf, nil
+		}
+	}
+
+	// Try manifest.json
+	jsonPath := filepath.Join(dir, "manifest.json")
+	if data, err := os.ReadFile(jsonPath); err == nil {
+		var mf Manifest
+		if err := json.Unmarshal(data, &mf); err == nil {
+			return &mf, nil
+		}
+	}
+
+	return nil, fmt.Errorf("plugin manifest not found (checked manifest.toml and manifest.json in %s)", dir)
+}
+
+// List installed plugins by reading manifest.toml or manifest.json in each plugin folder
 func (m *Manager) List() ([]Manifest, error) {
 	entries, err := os.ReadDir(m.pluginDir)
 	if err != nil {
@@ -160,17 +184,12 @@ func (m *Manager) List() ([]Manifest, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		manifestPath := filepath.Join(m.pluginDir, entry.Name(), "manifest.json")
-		data, err := os.ReadFile(manifestPath)
-		if err != nil {
-			continue
-		}
-		var mf Manifest
-		if err := json.Unmarshal(data, &mf); err == nil {
+		mf, err := readManifest(filepath.Join(m.pluginDir, entry.Name()))
+		if err == nil {
 			if mf.Name == "" {
 				mf.Name = entry.Name()
 			}
-			manifests = append(manifests, mf)
+			manifests = append(manifests, *mf)
 		}
 	}
 	return manifests, nil
@@ -178,19 +197,14 @@ func (m *Manager) List() ([]Manifest, error) {
 
 // GetInfo retrieves manifest for specific plugin
 func (m *Manager) GetInfo(name string) (*Manifest, error) {
-	manifestPath := filepath.Join(m.pluginDir, name, "manifest.json")
-	data, err := os.ReadFile(manifestPath)
+	mf, err := readManifest(filepath.Join(m.pluginDir, name))
 	if err != nil {
-		return nil, fmt.Errorf("plugin '%s' not found or missing manifest.json", name)
+		return nil, fmt.Errorf("plugin '%s' not found or missing manifest (manifest.toml or manifest.json)", name)
 	}
-	var mf Manifest
-	if err := json.Unmarshal(data, &mf); err != nil {
-		return nil, fmt.Errorf("invalid manifest.json for plugin '%s': %w", name, err)
-	}
-	return &mf, nil
+	return mf, nil
 }
 
-// Install installs a plugin from a local directory or binary
+// Install installs a plugin from a local directory containing manifest.toml or manifest.json
 func (m *Manager) Install(sourcePath string) (*Manifest, error) {
 	info, err := os.Stat(sourcePath)
 	if err != nil {
@@ -198,22 +212,16 @@ func (m *Manager) Install(sourcePath string) (*Manifest, error) {
 	}
 
 	if !info.IsDir() {
-		return nil, fmt.Errorf("source must be a directory containing binary and manifest.json")
+		return nil, fmt.Errorf("source must be a directory containing binary and manifest.toml or manifest.json")
 	}
 
-	manifestFile := filepath.Join(sourcePath, "manifest.json")
-	data, err := os.ReadFile(manifestFile)
+	mf, err := readManifest(sourcePath)
 	if err != nil {
-		return nil, fmt.Errorf("plugin manifest.json not found in %s", sourcePath)
-	}
-
-	var mf Manifest
-	if err := json.Unmarshal(data, &mf); err != nil {
-		return nil, fmt.Errorf("invalid manifest.json: %w", err)
+		return nil, err
 	}
 
 	if mf.Name == "" {
-		return nil, fmt.Errorf("manifest.json requires 'name'")
+		return nil, fmt.Errorf("manifest requires 'name'")
 	}
 
 	destDir := filepath.Join(m.pluginDir, mf.Name)
@@ -235,7 +243,7 @@ func (m *Manager) Install(sourcePath string) (*Manifest, error) {
 		}
 	}
 
-	return &mf, nil
+	return mf, nil
 }
 
 // Remove uninstalls a plugin
@@ -316,3 +324,64 @@ func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
 }
+
+// LoadAllClassifiers discovers all installed plugins with "classifier" capability,
+// spawns each one, collects custom rules via GetCustomRules(), and returns:
+//   - services: slice of active ClassifierService instances
+//   - rules: aggregated custom rules from all plugins
+//   - cleanup: function to kill all spawned plugin processes
+func (m *Manager) LoadAllClassifiers() ([]ClassifierService, []models.Rule, func()) {
+	var services []ClassifierService
+	var cleanups []func()
+	var extraRules []models.Rule
+
+	plugins, err := m.List()
+	if err != nil {
+		return nil, nil, func() {}
+	}
+
+	for _, p := range plugins {
+		hasClassifier := false
+		for _, cap := range p.Capabilities {
+			if cap == "classifier" {
+				hasClassifier = true
+				break
+			}
+		}
+		if !hasClassifier {
+			continue
+		}
+
+		svc, cleanup, err := m.LoadClassifier(p.Name)
+		if err != nil {
+			continue // skip broken plugins silently
+		}
+		services = append(services, svc)
+		cleanups = append(cleanups, cleanup)
+
+		// Collect custom rules injected by this plugin
+		if rules, err := svc.GetCustomRules(); err == nil && len(rules) > 0 {
+			extraRules = append(extraRules, rules...)
+		}
+	}
+
+	cleanupAll := func() {
+		for _, fn := range cleanups {
+			fn()
+		}
+	}
+
+	return services, extraRules, cleanupAll
+}
+
+// ClassifyWithPlugins tries each loaded plugin service to classify a file.
+// Returns the first non-empty, non-"Other" result, or empty string if no plugin matched.
+func ClassifyWithPlugins(services []ClassifierService, filename, ext string) string {
+	for _, svc := range services {
+		if result, err := svc.Classify(filename, ext); err == nil && result != "" && result != "Other" {
+			return result
+		}
+	}
+	return ""
+}
+

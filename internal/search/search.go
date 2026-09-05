@@ -36,6 +36,7 @@ type SearchOptions struct {
 	Fuzzy         bool
 	IncludeHidden bool
 	Limit         int
+	ClassifyFunc  func(filename, ext string) string // Optional: overrides built-in classifier
 }
 
 // SearchMatch represents a single matching file and optional content snippets
@@ -138,7 +139,12 @@ func (e *Engine) Search() ([]SearchMatch, error) {
 		}
 
 		// Category check
-		cat := classifier.ClassifyExtension(ext)
+		var cat string
+		if e.opts.ClassifyFunc != nil {
+			cat = e.opts.ClassifyFunc(name, ext)
+		} else {
+			cat = classifier.ClassifyExtension(ext)
+		}
 		if e.opts.Type != "" {
 			reqType := strings.ToLower(strings.TrimSpace(e.opts.Type))
 			if strings.ToLower(cat) != reqType {

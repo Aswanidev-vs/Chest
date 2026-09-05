@@ -14,6 +14,7 @@ import (
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/Aswanidev-vs/chest/internal/organizer"
 	"github.com/Aswanidev-vs/chest/internal/planner"
+	"github.com/Aswanidev-vs/chest/internal/plugin"
 	"github.com/Aswanidev-vs/chest/internal/presets"
 	"github.com/Aswanidev-vs/chest/internal/rules"
 	"github.com/Aswanidev-vs/chest/internal/scanner"
@@ -226,6 +227,37 @@ func newSortCmd() *cobra.Command {
 				}
 			}
 
+			// Load installed plugins with classifier capability
+			var pluginServices []plugin.ClassifierService
+			var pluginCleanup func()
+			if mgr, err := plugin.NewManager(); err == nil {
+				var pluginRules []models.Rule
+				pluginServices, pluginRules, pluginCleanup = mgr.LoadAllClassifiers()
+				if len(pluginRules) > 0 {
+					ruleList = append(ruleList, pluginRules...)
+					if f.verbose {
+						fmt.Printf("[PLUGIN] Injected %d custom rules from %d plugins\n", len(pluginRules), len(pluginServices))
+					}
+				}
+			}
+			if pluginCleanup != nil {
+				defer pluginCleanup()
+			}
+
+			// Build composite classifier: built-in first, plugin fallback
+			classifyFunc := func(filename, ext string) string {
+				cat := classifier.ClassifyExtension(ext)
+				if cat != classifier.TypeOther && cat != "" {
+					return cat
+				}
+				if len(pluginServices) > 0 {
+					if pluginCat := plugin.ClassifyWithPlugins(pluginServices, filename, ext); pluginCat != "" {
+						return pluginCat
+					}
+				}
+				return cat
+			}
+
 			// Initialize scanner
 			var exclusions []string
 			if f.exclude != "" {
@@ -237,6 +269,7 @@ func newSortCmd() *cobra.Command {
 				IncludeHidden:  f.hidden,
 				FollowSymlinks: f.followSymlinks,
 				Exclusions:     exclusions,
+				ClassifyFunc:   classifyFunc,
 			})
 
 			if f.verbose {
