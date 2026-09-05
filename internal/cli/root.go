@@ -39,4 +39,5 @@ func init() {
 	rootCmd.AddCommand(newAnalyzeCmd())
 	rootCmd.AddCommand(newCleanCmd())
 	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newManCmd())
 }

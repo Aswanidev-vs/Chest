@@ -72,6 +72,7 @@ make build
 | `chest analyze` | Read-only audit of storage distribution and old files | `chest analyze ~/Downloads` |
 | `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |
 | `chest clean` | Clear cached SQLite index (`--all` removes database file) | `chest clean --all` |
+| `chest man` | Display detailed manual page with examples (like Linux man) | `chest man sort` |
 | `chest preset` | List available built-in sorting presets | `chest preset` |
 | `chest version` | Display version and build architecture | `chest version` |
 

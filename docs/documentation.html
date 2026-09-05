@@ -48,6 +48,9 @@
           <li><a href="#cmd-undo">chest undo & history</a></li>
           <li><a href="#cmd-index">chest index & clean</a></li>
           <li><a href="#cmd-intel">chest stats, duplicates & analyze</a></li>
+          <li><a href="#cmd-man">chest man</a></li>
+          <li><a href="#cmd-preset">chest preset</a></li>
+          <li><a href="#cmd-version">chest version</a></li>
         </ul>
       </div>
 
@@ -145,6 +148,20 @@
           <li><code>chest duplicates [path]</code>: Byte-for-byte duplicate finder using cryptographic hashes</li>
           <li><code>chest analyze [path]</code>: Health report identifying stale files (>180 days), zero-byte files, and largest consumers</li>
         </ul>
+
+        <h3 id="cmd-man"><code>chest man [command]</code></h3>
+        <p>Displays a detailed manual page with full description, flags, and usage examples — works like the Linux <code>man</code> command but built into the CLI.</p>
+        <div class="code-block">chest man sort
+chest man search
+chest man watch</div>
+
+        <h3 id="cmd-preset"><code>chest preset</code></h3>
+        <p>Lists all available built-in sorting presets (<code>downloads</code>, <code>media</code>, <code>developer</code>, <code>documents</code>, <code>photos</code>) with their target file types.</p>
+        <div class="code-block">chest preset</div>
+
+        <h3 id="cmd-version"><code>chest version</code></h3>
+        <p>Prints CHEST version, OS/architecture, and Git commit SHA (when built from a Git checkout).</p>
+        <div class="code-block">chest version</div>
       </section>
 
       <!-- Plugin Guide -->
