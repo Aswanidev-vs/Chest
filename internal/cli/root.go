@@ -31,4 +31,5 @@ func init() {
 	rootCmd.AddCommand(newUndoCmd())
 	rootCmd.AddCommand(newPresetCmd())
 	rootCmd.AddCommand(newPluginCmd())
+	rootCmd.AddCommand(newWatchCmd())
 }

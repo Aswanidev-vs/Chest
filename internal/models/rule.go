@@ -11,6 +11,7 @@ const (
 	FieldName      TargetField = "name"
 	FieldDate      TargetField = "date"
 	FieldModTime   TargetField = "mod_time"
+	FieldMIME      TargetField = "mime"
 )
 
 // Operator defines comparison operator.

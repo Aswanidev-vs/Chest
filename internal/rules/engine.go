@@ -192,6 +192,20 @@ func evaluateCondition(cond models.Condition, file models.File) (bool, string) {
 			matched = file.ModTime.After(t) || file.ModTime.Equal(t)
 		}
 		return matched, fmt.Sprintf("date %s %s", cond.Operator, cond.Value)
+
+	case models.FieldMIME:
+		matched := false
+		switch cond.Operator {
+		case models.OpEqual:
+			matched = strings.EqualFold(file.MIMEType, cond.Value)
+		case models.OpNotEqual:
+			matched = !strings.EqualFold(file.MIMEType, cond.Value)
+		case models.OpContains:
+			matched = strings.Contains(strings.ToLower(file.MIMEType), strings.ToLower(cond.Value))
+		case models.OpStartsWith:
+			matched = strings.HasPrefix(strings.ToLower(file.MIMEType), strings.ToLower(cond.Value))
+		}
+		return matched, fmt.Sprintf("mime %s %s", cond.Operator, cond.Value)
 	}
 
 	return false, ""
@@ -199,6 +213,7 @@ func evaluateCondition(cond models.Condition, file models.File) (bool, string) {
 
 // ParseRule parses CLI rule string e.g.:
 // "type=video && size>1GB -> Videos/Large"
+// "name=~'^IMG_' -> Camera"
 // "*.mp4 -> Videos"
 // "size>500MB -> Huge"
 func ParseRule(ruleStr string, priority int) (models.Rule, error) {
@@ -248,6 +263,21 @@ func ParseRule(ruleStr string, priority int) (models.Rule, error) {
 }
 
 func parseClause(clause string) (models.Condition, error) {
+	// Handle =~ for regex first
+	if idx := strings.Index(clause, "=~"); idx != -1 {
+		fieldStr := strings.TrimSpace(clause[:idx])
+		valStr := strings.Trim(strings.TrimSpace(clause[idx+2:]), "\"'")
+		field, err := mapField(fieldStr)
+		if err != nil {
+			return models.Condition{}, err
+		}
+		return models.Condition{
+			Field:    field,
+			Operator: models.OpRegex,
+			Value:    valStr,
+		}, nil
+	}
+
 	operators := []models.Operator{
 		models.OpGreaterEq,
 		models.OpLessEq,
@@ -268,20 +298,9 @@ func parseClause(clause string) (models.Condition, error) {
 			valStr := strings.TrimSpace(clause[idx+len(opStr):])
 			valStr = strings.Trim(valStr, "\"'")
 
-			var field models.TargetField
-			switch strings.ToLower(fieldStr) {
-			case "type":
-				field = models.FieldType
-			case "ext", "extension", "format":
-				field = models.FieldExtension
-			case "size":
-				field = models.FieldSize
-			case "name", "filename":
-				field = models.FieldName
-			case "date", "modified", "modtime":
-				field = models.FieldDate
-			default:
-				return models.Condition{}, fmt.Errorf("unknown field '%s'", fieldStr)
+			field, err := mapField(fieldStr)
+			if err != nil {
+				return models.Condition{}, err
 			}
 
 			return models.Condition{
@@ -293,6 +312,25 @@ func parseClause(clause string) (models.Condition, error) {
 	}
 
 	return models.Condition{}, fmt.Errorf("unable to parse condition: %s", clause)
+}
+
+func mapField(fieldStr string) (models.TargetField, error) {
+	switch strings.ToLower(fieldStr) {
+	case "type":
+		return models.FieldType, nil
+	case "ext", "extension", "format":
+		return models.FieldExtension, nil
+	case "size":
+		return models.FieldSize, nil
+	case "name", "filename":
+		return models.FieldName, nil
+	case "date", "modified", "modtime":
+		return models.FieldDate, nil
+	case "mime", "mimetype":
+		return models.FieldMIME, nil
+	default:
+		return "", fmt.Errorf("unknown field '%s'", fieldStr)
+	}
 }
 
 // ParseSize parses human readable byte sizes: "500KB", "1GB", "2.5MB", "1024"
