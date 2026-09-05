@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Aswanidev-vs/chest/internal/classifier"
@@ -37,6 +36,7 @@ type SearchOptions struct {
 	Fuzzy         bool
 	IncludeHidden bool
 	Limit         int
+	ClassifyFunc  func(filename, ext string) string // Optional: overrides built-in classifier
 }
 
 // SearchMatch represents a single matching file and optional content snippets
@@ -139,7 +139,12 @@ func (e *Engine) Search() ([]SearchMatch, error) {
 		}
 
 		// Category check
-		cat := classifier.ClassifyExtension(ext)
+		var cat string
+		if e.opts.ClassifyFunc != nil {
+			cat = e.opts.ClassifyFunc(name, ext)
+		} else {
+			cat = classifier.ClassifyExtension(ext)
+		}
 		if e.opts.Type != "" {
 			reqType := strings.ToLower(strings.TrimSpace(e.opts.Type))
 			if strings.ToLower(cat) != reqType {
@@ -427,17 +432,3 @@ func matchesDateCondition(modTime time.Time, cond string) bool {
 	return true
 }
 
-func isHiddenEntry(path, name string, d fs.DirEntry) bool {
-	if strings.HasPrefix(name, ".") && name != "." && name != ".." {
-		return true
-	}
-
-	info, err := d.Info()
-	if err == nil && info.Sys() != nil {
-		if winInfo, ok := info.Sys().(*syscall.Win32FileAttributeData); ok {
-			return winInfo.FileAttributes&syscall.FILE_ATTRIBUTE_HIDDEN != 0
-		}
-	}
-
-	return false
-}

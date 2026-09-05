@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,7 +109,7 @@ func (m *Manager) List() ([]models.HistoryEntry, error) {
 }
 
 // Undo reverses an operation by ID (or latest if id == 0)
-func (m *Manager) Undo(targetID int) (*models.HistoryEntry, int, error) {
+func (m *Manager) Undo(targetID int, allowSystem ...bool) (*models.HistoryEntry, int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -149,6 +151,12 @@ func (m *Manager) Undo(targetID int) (*models.HistoryEntry, int, error) {
 
 	entry := &store.Entries[entryIndex]
 
+	// 0. Safety check system directory
+	allowSys := len(allowSystem) > 0 && allowSystem[0]
+	if isSys, reason := filesystem.IsSystemPath(entry.Directory); isSys && !allowSys {
+		return nil, 0, fmt.Errorf("access denied: operation #%d targeted protected %s (%s).\nCHEST restricts restoring files in OS and system directories.\nUse --allow-system to override if intentional", entry.ID, reason, entry.Directory)
+	}
+
 	// 1. Safety check all operations before moving anything
 	for _, op := range entry.Operations {
 		// Verify moved destination file still exists
@@ -170,11 +178,65 @@ func (m *Manager) Undo(targetID int) (*models.HistoryEntry, int, error) {
 		restoredCount++
 	}
 
-	// 3. Mark status as Undone
+	// 3. Clean up empty destination directories left behind up to the target root directory
+	absRoot, errRoot := filepath.Abs(entry.Directory)
+	if errRoot != nil {
+		absRoot = filepath.Clean(entry.Directory)
+	}
+
+	dirsToClean := make(map[string]bool)
+	for _, op := range entry.Operations {
+		absDest, errDest := filepath.Abs(op.Destination)
+		if errDest != nil {
+			absDest = filepath.Clean(op.Destination)
+		}
+		dir := filepath.Dir(absDest)
+		for {
+			dirClean := filepath.Clean(dir)
+			rel, errRel := filepath.Rel(absRoot, dirClean)
+			if errRel != nil || rel == "." || strings.HasPrefix(rel, "..") {
+				break
+			}
+			dirsToClean[dirClean] = true
+			parent := filepath.Dir(dirClean)
+			if parent == dirClean {
+				break
+			}
+			dir = parent
+		}
+	}
+
+	// Sort deepest directories first so child empty folders are deleted before parent folders
+	var sortedDirs []string
+	for d := range dirsToClean {
+		sortedDirs = append(sortedDirs, d)
+	}
+	sort.Slice(sortedDirs, func(i, j int) bool {
+		return len(sortedDirs[i]) > len(sortedDirs[j])
+	})
+
+	for _, d := range sortedDirs {
+		// os.Remove only succeeds if directory is completely empty
+		_ = os.Remove(d)
+	}
+
+	// 4. Mark status as Undone
 	entry.Status = "Undone"
 	if err := m.save(store); err != nil {
 		return entry, restoredCount, fmt.Errorf("files restored, but failed updating history status: %w", err)
 	}
 
 	return entry, restoredCount, nil
+}
+
+// ClearHistory removes all undo history by deleting the history.json file
+func (m *Manager) ClearHistory() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	err := os.Remove(m.filePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to clear history: %w", err)
+	}
+	return nil
 }

@@ -9,10 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/Aswanidev-vs/chest/internal/classifier"
+	"github.com/Aswanidev-vs/chest/internal/filesystem"
 	"github.com/Aswanidev-vs/chest/internal/history"
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/Aswanidev-vs/chest/internal/organizer"
 	"github.com/Aswanidev-vs/chest/internal/planner"
+	"github.com/Aswanidev-vs/chest/internal/plugin"
 	"github.com/Aswanidev-vs/chest/internal/presets"
 	"github.com/Aswanidev-vs/chest/internal/rules"
 	"github.com/Aswanidev-vs/chest/internal/scanner"
@@ -35,6 +37,7 @@ type sortFlags struct {
 	customRules    []string
 	followSymlinks bool
 	collision      string
+	allowSystem    bool
 }
 
 func newSortCmd() *cobra.Command {
@@ -52,6 +55,37 @@ func newSortCmd() *cobra.Command {
 			absTarget, err := filepath.Abs(targetDir)
 			if err != nil {
 				return fmt.Errorf("invalid target directory: %w", err)
+			}
+
+			// Guard: System and OS path protection
+			if isSys, reason := filesystem.IsSystemPath(absTarget); isSys {
+				if !f.allowSystem {
+					return fmt.Errorf("access denied: '%s' is located in protected %s.\nCHEST restricts modifications to OS and system directories.\nUse --allow-system to override if intentional", absTarget, reason)
+				}
+				// If allowSystem passed, require explicit warning confirmation unless -y is specified
+				if !f.yes {
+					fmt.Printf("\n\x1b[1;38;5;196m⚠ CRITICAL SAFETY WARNING:\x1b[0m\n")
+					fmt.Printf("You are targeting protected %s:\n  \x1b[38;5;220m%s\x1b[0m\n", reason, absTarget)
+					fmt.Printf("Organizing this location may move or alter OS/system files!\n\n")
+					fmt.Print("Are you sure you want to proceed with system path modifications? [y/N]: ")
+					reader := bufio.NewReader(os.Stdin)
+					resp, _ := reader.ReadString('\n')
+					resp = strings.TrimSpace(strings.ToLower(resp))
+					if resp != "y" && resp != "yes" {
+						fmt.Println("Operation aborted for safety.")
+						return nil
+					}
+				}
+			}
+
+			// If custom destination -i / --into is specified, check it too
+			if f.into != "" {
+				absInto, err := filepath.Abs(f.into)
+				if err == nil {
+					if isSys, reason := filesystem.IsSystemPath(absInto); isSys && !f.allowSystem {
+						return fmt.Errorf("access denied: destination '%s' is located in protected %s.\nUse --allow-system to override", absInto, reason)
+					}
+				}
 			}
 
 			// Validate collision policy
@@ -118,23 +152,37 @@ func newSortCmd() *cobra.Command {
 			if f.bySize {
 				ruleList = append(ruleList,
 					models.Rule{
-						Name:        "Large Files (>1GB)",
+						Name:        "Huge Files (>1GB)",
 						Priority:    25,
-						Destination: "Large Files",
+						Destination: "Huge Files",
 						MinSize:     "1GB",
 					},
 					models.Rule{
-						Name:        "Medium Files (100MB-1GB)",
+						Name:        "Large Files (100MB-1GB)",
 						Priority:    24,
-						Destination: "Medium Files",
+						Destination: "Large Files",
 						MinSize:     "100MB",
 						MaxSize:     "1GB",
 					},
 					models.Rule{
-						Name:        "Small Files (<100MB)",
+						Name:        "Medium Files (10MB-100MB)",
 						Priority:    23,
-						Destination: "Small Files",
+						Destination: "Medium Files",
+						MinSize:     "10MB",
 						MaxSize:     "100MB",
+					},
+					models.Rule{
+						Name:        "Small Files (1MB-10MB)",
+						Priority:    22,
+						Destination: "Small Files",
+						MinSize:     "1MB",
+						MaxSize:     "10MB",
+					},
+					models.Rule{
+						Name:        "Tiny Files (<1MB)",
+						Priority:    21,
+						Destination: "Tiny Files",
+						MaxSize:     "1MB",
 					},
 				)
 			}
@@ -179,14 +227,79 @@ func newSortCmd() *cobra.Command {
 				}
 			}
 
+			// Load installed plugins with classifier capability
+			var pluginServices []plugin.ClassifierService
+			var pluginCleanup func()
+			if mgr, err := plugin.NewManager(); err == nil {
+				var pluginRules []models.Rule
+				pluginServices, pluginRules, pluginCleanup = mgr.LoadAllClassifiers()
+				if len(pluginRules) > 0 {
+					ruleList = append(ruleList, pluginRules...)
+					if f.verbose {
+						fmt.Printf("[PLUGIN] Injected %d custom rules from %d plugins\n", len(pluginRules), len(pluginServices))
+					}
+				}
+			}
+			if pluginCleanup != nil {
+				defer pluginCleanup()
+			}
+
+			// Build composite classifier: built-in first, plugin fallback
+			classifyFunc := func(filename, ext string) string {
+				cat := classifier.ClassifyExtension(ext)
+				if cat != classifier.TypeOther && cat != "" {
+					return cat
+				}
+				if len(pluginServices) > 0 {
+					if pluginCat := plugin.ClassifyWithPlugins(pluginServices, filename, ext); pluginCat != "" {
+						return pluginCat
+					}
+				}
+				return cat
+			}
+
+			// Initialize scanner
+			var exclusions []string
+			if f.exclude != "" {
+				exclusions = append(exclusions, f.exclude)
+			}
+
+			sc := scanner.New(scanner.ScanOptions{
+				Recursive:      f.recursive,
+				IncludeHidden:  f.hidden,
+				FollowSymlinks: f.followSymlinks,
+				Exclusions:     exclusions,
+				ClassifyFunc:   classifyFunc,
+			})
+
+			if f.verbose {
+				fmt.Printf("[SCAN] %s\n", absTarget)
+			}
+
+			files, err := sc.Scan(absTarget)
+			if err != nil {
+				return fmt.Errorf("error scanning %s: %w", absTarget, err)
+			}
+
 			// Dynamic destination handling for {ext}
 			var expandedRules []models.Rule
 			for _, r := range ruleList {
 				if r.Destination == "{ext}" {
+					extSet := make(map[string]bool)
+					// Dynamically include every extension found in scanned files
+					for _, file := range files {
+						if file.Extension != "" {
+							extSet[strings.ToLower(file.Extension)] = true
+						}
+					}
+					// Baseline fallback extensions
 					commonExts := []string{
-						"jpg", "png", "pdf", "mp4", "zip", "txt", "docx", "mp3", "exe",
+						"jpg", "jpeg", "png", "gif", "webp", "svg", "pdf", "mp4", "mkv", "avi", "mov", "zip", "tar", "gz", "7z", "rar", "txt", "md", "docx", "xlsx", "pptx", "mp3", "wav", "flac", "aac", "ogg", "exe", "msi", "iso", "json", "xml", "csv", "go", "py", "js", "ts", "html", "css",
 					}
 					for _, ext := range commonExts {
+						extSet[ext] = true
+					}
+					for ext := range extSet {
 						expandedRules = append(expandedRules, models.Rule{
 							Name:        fmt.Sprintf("Ext: %s", strings.ToUpper(ext)),
 							Priority:    r.Priority,
@@ -201,28 +314,6 @@ func newSortCmd() *cobra.Command {
 				}
 			}
 			ruleList = expandedRules
-
-			// Initialize scanner
-			var exclusions []string
-			if f.exclude != "" {
-				exclusions = append(exclusions, f.exclude)
-			}
-
-			sc := scanner.New(scanner.ScanOptions{
-				Recursive:      f.recursive,
-				IncludeHidden:  f.hidden,
-				FollowSymlinks: f.followSymlinks,
-				Exclusions:     exclusions,
-			})
-
-			if f.verbose {
-				fmt.Printf("[SCAN] %s\n", absTarget)
-			}
-
-			files, err := sc.Scan(absTarget)
-			if err != nil {
-				return fmt.Errorf("error scanning %s: %w", absTarget, err)
-			}
 
 			engine := rules.NewEngine(ruleList)
 			pl := planner.New(engine, f.into, collisionPolicy)
@@ -302,6 +393,7 @@ func newSortCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&f.customRules, "rule", nil, "Custom rule e.g. 'type=video && size>1GB -> Videos/Large'")
 	cmd.Flags().BoolVar(&f.followSymlinks, "follow-symlinks", false, "Follow symbolic links")
 	cmd.Flags().StringVar(&f.collision, "collision", "skip", "Collision policy: skip, rename, replace, abort")
+	cmd.Flags().BoolVar(&f.allowSystem, "allow-system", false, "Allow modifications in protected OS or system directories")
 
 	return cmd
 }

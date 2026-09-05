@@ -1,0 +1,7 @@
+{
+  "name": "code-artifacts",
+  "version": "0.1.1",
+  "description": "Classifies developer build artifacts, WASM binaries, and coverage reports",
+  "capabilities": ["classifier", "rule"],
+  "binary": "code-artifacts"
+}

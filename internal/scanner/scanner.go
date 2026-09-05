@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/Aswanidev-vs/chest/internal/classifier"
 	"github.com/Aswanidev-vs/chest/internal/models"
@@ -17,6 +16,7 @@ type ScanOptions struct {
 	FollowSymlinks bool
 	Exclusions     []string // Names, patterns, or relative directories to skip
 	IgnoreDirs     []string // Output directories being created by CHEST
+	ClassifyFunc   func(filename, ext string) string // Optional: overrides built-in classifier
 }
 
 // Scanner traverses files in a directory
@@ -102,7 +102,12 @@ func (s *Scanner) Scan(root string) ([]models.File, error) {
 
 		relPath, _ := filepath.Rel(root, path)
 		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
-		cat := classifier.ClassifyExtension(ext)
+		var cat string
+		if s.opts.ClassifyFunc != nil {
+			cat = s.opts.ClassifyFunc(name, ext)
+		} else {
+			cat = classifier.ClassifyExtension(ext)
+		}
 
 		files = append(files, models.File{
 			Path:      path,
@@ -174,18 +179,3 @@ func (s *Scanner) isExcluded(path, root, name string, exclusions map[string]stru
 	return false
 }
 
-func isHidden(path, name string, info os.FileInfo) bool {
-	// Standard Unix dotfile check
-	if strings.HasPrefix(name, ".") && name != "." && name != ".." {
-		return true
-	}
-
-	// Windows hidden file attribute check
-	if sys := info.Sys(); sys != nil {
-		if winInfo, ok := sys.(*syscall.Win32FileAttributeData); ok {
-			return winInfo.FileAttributes&syscall.FILE_ATTRIBUTE_HIDDEN != 0
-		}
-	}
-
-	return false
-}

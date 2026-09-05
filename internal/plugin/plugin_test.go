@@ -68,3 +68,43 @@ func TestPluginManager(t *testing.T) {
 		t.Errorf("Expected 0 plugins after removal, got %d", len(listAfter))
 	}
 }
+
+func TestPluginTomlManifest(t *testing.T) {
+	tempDir := t.TempDir()
+	pluginHome := filepath.Join(tempDir, "installed")
+	srcDir := filepath.Join(tempDir, "source-wasm")
+	_ = os.MkdirAll(srcDir, 0755)
+
+	mgr, err := NewManager(pluginHome)
+	if err != nil {
+		t.Fatalf("Failed to create manager: %v", err)
+	}
+
+	tomlContent := `name = "wasm-sorter"
+version = "2.1.0"
+description = "WebAssembly organizer plugin"
+author = "Wasm Dev"
+capabilities = ["classifier", "rule"]
+binary = "wasm-sorter"
+`
+	_ = os.WriteFile(filepath.Join(srcDir, "manifest.toml"), []byte(tomlContent), 0644)
+	_ = os.WriteFile(filepath.Join(srcDir, "wasm-sorter"), []byte("#!/bin/sh\nexit 0"), 0755)
+
+	// Install from TOML manifest
+	installed, err := mgr.Install(srcDir)
+	if err != nil {
+		t.Fatalf("Failed to install TOML plugin: %v", err)
+	}
+	if installed.Name != "wasm-sorter" || installed.Version != "2.1.0" {
+		t.Errorf("Unexpected installed manifest: %+v", installed)
+	}
+
+	// Read via GetInfo
+	info, err := mgr.GetInfo("wasm-sorter")
+	if err != nil {
+		t.Fatalf("Failed to get TOML plugin info: %v", err)
+	}
+	if info.Author != "Wasm Dev" {
+		t.Errorf("Expected author 'Wasm Dev', got %s", info.Author)
+	}
+}

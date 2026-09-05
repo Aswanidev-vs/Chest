@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"strings"
 	"text/tabwriter"
@@ -61,7 +62,10 @@ func newIndexCmd() *cobra.Command {
 }
 
 func newCleanCmd() *cobra.Command {
-	var purgeAll bool
+	var (
+		purgeAll bool
+		yes      bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "clean",
@@ -73,11 +77,34 @@ func newCleanCmd() *cobra.Command {
 			}
 
 			if purgeAll {
+				// Confirmation prompt
+				if !yes {
+					fmt.Print("\x1b[1;38;5;214m⚠ This will permanently delete ~/.chest/index.db.\x1b[0m\n\nContinue? [y/N]: ")
+					reader := bufio.NewReader(os.Stdin)
+					resp, _ := reader.ReadString('\n')
+					resp = strings.TrimSpace(strings.ToLower(resp))
+					if resp != "y" && resp != "yes" {
+						fmt.Println("Operation aborted.")
+						return nil
+					}
+				}
 				if err := store.DeleteDB(); err != nil && !os.IsNotExist(err) {
 					return fmt.Errorf("failed removing db: %w", err)
 				}
 				fmt.Println("\x1b[1;38;5;82m✔ Completely removed ~/.chest/index.db database file.\x1b[0m")
 				return nil
+			}
+
+			// Confirmation prompt for index clear
+			if !yes {
+				fmt.Print("\x1b[1;38;5;214m⚠ This will clear the cached file index.\x1b[0m\n\nContinue? [y/N]: ")
+				reader := bufio.NewReader(os.Stdin)
+				resp, _ := reader.ReadString('\n')
+				resp = strings.TrimSpace(strings.ToLower(resp))
+				if resp != "y" && resp != "yes" {
+					fmt.Println("Operation aborted.")
+					return nil
+				}
 			}
 
 			if err := store.ClearIndex(); err != nil {
@@ -92,6 +119,7 @@ func newCleanCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&purgeAll, "all", false, "Completely delete the ~/.chest/index.db database file")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
 	return cmd
 }
 

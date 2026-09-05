@@ -8,16 +8,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Aswanidev-vs/chest/internal/filesystem"
 	"github.com/Aswanidev-vs/chest/internal/watcher"
 	"github.com/spf13/cobra"
 )
 
 func newWatchCmd() *cobra.Command {
 	var (
-		presetName string
-		rulesList  []string
-		debounce   time.Duration
-		dryRun     bool
+		presetName  string
+		rulesList   []string
+		debounce    time.Duration
+		dryRun      bool
+		allowSystem bool
 	)
 
 	cmd := &cobra.Command{
@@ -32,6 +34,10 @@ CHEST automatically applies preset or custom rules and organizes them into compa
 			dir := "."
 			if len(args) > 0 {
 				dir = args[0]
+			}
+
+			if err := filesystem.CheckSafeDirectory(dir, allowSystem); err != nil {
+				return err
 			}
 
 			w, err := watcher.New(watcher.WatchOptions{
@@ -79,6 +85,7 @@ CHEST automatically applies preset or custom rules and organizes them into compa
 	cmd.Flags().StringArrayVarP(&rulesList, "rule", "r", nil, "Custom rule string")
 	cmd.Flags().DurationVarP(&debounce, "debounce", "d", 500*time.Millisecond, "Settle duration before moving file")
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Preview what watch would organize")
+	cmd.Flags().BoolVar(&allowSystem, "allow-system", false, "Allow monitoring and moving files in protected system directories")
 
 	return cmd
 }

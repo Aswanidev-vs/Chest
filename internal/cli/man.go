@@ -49,7 +49,7 @@ Supports dry-run preview and automatic creation of destination folders.`,
 		Options: []string{
 			"-t, --type           Sort files into category folders (Images, Videos, Documents...)",
 			"-f, --format         Sort files into folders by extension (png, pdf, mp4...)",
-			"-s, --size           Sort files by size thresholds (Small, Medium, Large, Huge)",
+			"-s, --size           Sort files by size thresholds (Tiny, Small, Medium, Large, Huge)",
 			"-d, --date           Sort files by modification year/month (YYYY/MM)",
 			"-p, --preset <name>  Apply built-in preset (downloads, media, developer, documents, photos)",
 			"-r, --rule <spec>    Custom rule on the fly (e.g. 'type=video && size>1GB -> Videos/Large')",
@@ -58,6 +58,7 @@ Supports dry-run preview and automatic creation of destination folders.`,
 			"-y, --yes            Skip interactive confirmation prompt",
 			"-c, --collision      Collision policy: skip (default), rename, replace, abort",
 			"-H, --hidden         Include hidden files and folders",
+			"--allow-system       Allow modifications in protected OS or system directories",
 		},
 		Examples: []string{
 			"chest sort                           Sort current directory with default preset",
@@ -106,6 +107,7 @@ into compartments according to chosen presets or rules.`,
 			"-r, --rule <spec>    Custom rule expression to apply",
 			"-d, --debounce <dur> Settle duration before moving file (default: 500ms)",
 			"-n, --dry-run        Print actions without actually moving files",
+			"--allow-system       Allow monitoring and moving in protected system directories",
 		},
 		Examples: []string{
 			"chest watch ~/Downloads             Continuously organize downloads as files arrive",
@@ -116,18 +118,26 @@ into compartments according to chosen presets or rules.`,
 	},
 	"undo": {
 		Name:     "CHEST-UNDO(1) - Operation Rollback",
-		Synopsis: "chest undo [operation-id]",
+		Synopsis: "chest undo [operation-id] [flags]",
 		Description: `Reverses previous file organization operations, restoring moved files back
 to their exact original paths. Checks for destination file existence and source path
-availability before modifying filesystem.`,
+availability before modifying filesystem.
+
+Subcommand 'cache' manages the undo history store (~/.chest/history.json).
+Use 'chest undo cache' to view cache info or '--clear' to wipe all history.`,
 		Options: []string{
 			"[operation-id]       Specific history ID to undo (default: latest active run)",
+			"--allow-system       Allow undo restoring into protected system directories",
+			"cache                Show undo cache info (stored operations count)",
+			"cache --clear        Permanently delete all undo history",
 		},
 		Examples: []string{
 			"chest undo                           Undo the most recent organization run",
 			"chest undo 3                         Undo specific operation run with ID #3",
+			"chest undo cache                     Show how many operations are stored",
+			"chest undo cache --clear             Wipe all undo history permanently",
 		},
-		SeeAlso: []string{"history", "sort"},
+		SeeAlso: []string{"history", "sort", "clean"},
 	},
 	"history": {
 		Name:     "CHEST-HISTORY(1) - Organization Log",
@@ -214,15 +224,19 @@ without touching the core binary.`,
 		Name:     "CHEST-CLEAN(1) - Cache & Database Cleanup",
 		Synopsis: "chest clean [flags]",
 		Description: `Empties cached index records from SQLite files table or deletes the database
-file completely from disk.`,
+file completely from disk. Requires interactive y/N confirmation before executing.
+Use -y/--yes flag to bypass the prompt in scripts or automation.`,
 		Options: []string{
 			"--all                Completely delete ~/.chest/index.db file",
+			"-y, --yes            Skip confirmation prompt",
 		},
 		Examples: []string{
-			"chest clean                          Empty cached file records",
+			"chest clean                          Empty cached file records (with confirmation)",
+			"chest clean -y                       Empty cached records without asking",
 			"chest clean --all                    Remove ~/.chest/index.db database file",
+			"chest clean --all -y                 Remove database file without asking",
 		},
-		SeeAlso: []string{"index"},
+		SeeAlso: []string{"index", "undo"},
 	},
 }
 
