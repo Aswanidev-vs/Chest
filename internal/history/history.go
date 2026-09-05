@@ -178,3 +178,15 @@ func (m *Manager) Undo(targetID int) (*models.HistoryEntry, int, error) {
 
 	return entry, restoredCount, nil
 }
+
+// ClearHistory removes all undo history by deleting the history.json file
+func (m *Manager) ClearHistory() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	err := os.Remove(m.filePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to clear history: %w", err)
+	}
+	return nil
+}

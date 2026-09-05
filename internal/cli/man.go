@@ -119,15 +119,22 @@ into compartments according to chosen presets or rules.`,
 		Synopsis: "chest undo [operation-id]",
 		Description: `Reverses previous file organization operations, restoring moved files back
 to their exact original paths. Checks for destination file existence and source path
-availability before modifying filesystem.`,
+availability before modifying filesystem.
+
+Subcommand 'cache' manages the undo history store (~/.chest/history.json).
+Use 'chest undo cache' to view cache info or '--clear' to wipe all history.`,
 		Options: []string{
 			"[operation-id]       Specific history ID to undo (default: latest active run)",
+			"cache                Show undo cache info (stored operations count)",
+			"cache --clear        Permanently delete all undo history",
 		},
 		Examples: []string{
 			"chest undo                           Undo the most recent organization run",
 			"chest undo 3                         Undo specific operation run with ID #3",
+			"chest undo cache                     Show how many operations are stored",
+			"chest undo cache --clear             Wipe all undo history permanently",
 		},
-		SeeAlso: []string{"history", "sort"},
+		SeeAlso: []string{"history", "sort", "clean"},
 	},
 	"history": {
 		Name:     "CHEST-HISTORY(1) - Organization Log",
@@ -214,15 +221,19 @@ without touching the core binary.`,
 		Name:     "CHEST-CLEAN(1) - Cache & Database Cleanup",
 		Synopsis: "chest clean [flags]",
 		Description: `Empties cached index records from SQLite files table or deletes the database
-file completely from disk.`,
+file completely from disk. Requires interactive y/N confirmation before executing.
+Use -y/--yes flag to bypass the prompt in scripts or automation.`,
 		Options: []string{
 			"--all                Completely delete ~/.chest/index.db file",
+			"-y, --yes            Skip confirmation prompt",
 		},
 		Examples: []string{
-			"chest clean                          Empty cached file records",
+			"chest clean                          Empty cached file records (with confirmation)",
+			"chest clean -y                       Empty cached records without asking",
 			"chest clean --all                    Remove ~/.chest/index.db database file",
+			"chest clean --all -y                 Remove database file without asking",
 		},
-		SeeAlso: []string{"index"},
+		SeeAlso: []string{"index", "undo"},
 	},
 }
 
