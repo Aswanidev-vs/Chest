@@ -1,0 +1,28 @@
+[preset]
+name = "Media"
+description = "Organize media by video, music, and pictures"
+
+[[rules]]
+name = "Movies and TV"
+priority = 60
+extensions = ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm"]
+min_size = "500MB"
+destination = "Movies"
+
+[[rules]]
+name = "Short Videos"
+priority = 50
+extensions = ["mp4", "mkv", "avi", "mov", "webm"]
+destination = "Videos"
+
+[[rules]]
+name = "Music"
+priority = 50
+extensions = ["mp3", "flac", "wav", "aac", "ogg", "m4a", "opus"]
+destination = "Music"
+
+[[rules]]
+name = "Images"
+priority = 50
+extensions = ["jpg", "jpeg", "png", "gif", "webp", "svg", "raw", "heic"]
+destination = "Images"

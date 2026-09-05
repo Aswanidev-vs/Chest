@@ -1,0 +1,45 @@
+[preset]
+name = "Downloads"
+description = "Default download folder organization"
+
+[[rules]]
+name = "Images"
+priority = 50
+extensions = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "tiff", "ico", "heic"]
+destination = "Images"
+
+[[rules]]
+name = "Videos"
+priority = 50
+extensions = ["mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v"]
+destination = "Videos"
+
+[[rules]]
+name = "Audio"
+priority = 50
+extensions = ["mp3", "wav", "flac", "aac", "ogg", "wma", "m4a", "opus"]
+destination = "Audio"
+
+[[rules]]
+name = "Documents"
+priority = 50
+extensions = ["pdf", "doc", "docx", "txt", "rtf", "odt", "xls", "xlsx", "ppt", "pptx", "csv", "md"]
+destination = "Documents"
+
+[[rules]]
+name = "Archives"
+priority = 50
+extensions = ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz", "iso"]
+destination = "Archives"
+
+[[rules]]
+name = "Applications"
+priority = 50
+extensions = ["exe", "msi", "dmg", "pkg", "deb", "rpm", "apk"]
+destination = "Applications"
+
+[[rules]]
+name = "Code"
+priority = 50
+extensions = ["go", "py", "js", "ts", "jsx", "tsx", "html", "css", "json", "yaml", "yml", "toml", "c", "cpp", "java", "rs", "sh"]
+destination = "Code"

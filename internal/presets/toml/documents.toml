@@ -1,0 +1,33 @@
+[preset]
+name = "Documents"
+description = "Organize documents by category"
+
+[[rules]]
+name = "PDF Documents"
+priority = 50
+extensions = ["pdf"]
+destination = "PDF"
+
+[[rules]]
+name = "Word Documents"
+priority = 50
+extensions = ["doc", "docx", "odt", "rtf"]
+destination = "Word"
+
+[[rules]]
+name = "Spreadsheets"
+priority = 50
+extensions = ["xls", "xlsx", "ods", "csv"]
+destination = "Spreadsheets"
+
+[[rules]]
+name = "Presentations"
+priority = 50
+extensions = ["ppt", "pptx", "odp"]
+destination = "Presentations"
+
+[[rules]]
+name = "Text and Notes"
+priority = 40
+extensions = ["txt", "md"]
+destination = "Text"

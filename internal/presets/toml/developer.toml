@@ -1,0 +1,27 @@
+[preset]
+name = "Developer"
+description = "Organize code, binaries, archives, and documentation"
+
+[[rules]]
+name = "Source Code"
+priority = 50
+extensions = ["go", "py", "js", "ts", "jsx", "tsx", "c", "cpp", "h", "java", "rs", "rb", "php", "sh", "bat", "ps1"]
+destination = "Source"
+
+[[rules]]
+name = "Archives"
+priority = 50
+extensions = ["zip", "tar", "gz", "bz2", "7z", "tgz"]
+destination = "Archives"
+
+[[rules]]
+name = "Builds and Executables"
+priority = 50
+extensions = ["exe", "msi", "dll", "so", "dylib", "bin", "o", "a"]
+destination = "Builds"
+
+[[rules]]
+name = "Documentation"
+priority = 40
+extensions = ["md", "pdf", "txt", "doc", "docx"]
+destination = "Documentation"

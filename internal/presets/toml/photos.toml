@@ -1,0 +1,21 @@
+[preset]
+name = "Photos"
+description = "Organize photos by date and type"
+
+[[rules]]
+name = "RAW Photos"
+priority = 60
+extensions = ["raw", "cr2", "nef", "arw", "dng"]
+destination = "RAW"
+
+[[rules]]
+name = "Standard Photos"
+priority = 50
+extensions = ["jpg", "jpeg", "png", "heic", "webp"]
+destination = "Photos"
+
+[[rules]]
+name = "Screenshots"
+priority = 55
+destination = "Screenshots"
+type = "Image"
