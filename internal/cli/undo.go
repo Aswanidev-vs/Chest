@@ -12,6 +12,8 @@ import (
 )
 
 func newUndoCmd() *cobra.Command {
+	var allowSystem bool
+
 	undoCmd := &cobra.Command{
 		Use:   "undo [operation-id]",
 		Short: "Undo the latest operation or a specific operation by ID",
@@ -30,7 +32,7 @@ func newUndoCmd() *cobra.Command {
 				targetID = parsed
 			}
 
-			entry, count, err := mgr.Undo(targetID)
+			entry, count, err := mgr.Undo(targetID, allowSystem)
 			if err != nil {
 				return fmt.Errorf("undo failed: %w", err)
 			}
@@ -41,6 +43,8 @@ func newUndoCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	undoCmd.Flags().BoolVar(&allowSystem, "allow-system", false, "Allow undo restoring files in protected system directories")
 
 	// Subcommand: chest undo cache [--clear]
 	var clearCache bool

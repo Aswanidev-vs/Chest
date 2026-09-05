@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/Aswanidev-vs/chest/internal/classifier"
+	"github.com/Aswanidev-vs/chest/internal/filesystem"
 	"github.com/Aswanidev-vs/chest/internal/history"
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/Aswanidev-vs/chest/internal/organizer"
@@ -35,6 +36,7 @@ type sortFlags struct {
 	customRules    []string
 	followSymlinks bool
 	collision      string
+	allowSystem    bool
 }
 
 func newSortCmd() *cobra.Command {
@@ -52,6 +54,37 @@ func newSortCmd() *cobra.Command {
 			absTarget, err := filepath.Abs(targetDir)
 			if err != nil {
 				return fmt.Errorf("invalid target directory: %w", err)
+			}
+
+			// Guard: System and OS path protection
+			if isSys, reason := filesystem.IsSystemPath(absTarget); isSys {
+				if !f.allowSystem {
+					return fmt.Errorf("access denied: '%s' is located in protected %s.\nCHEST restricts modifications to OS and system directories.\nUse --allow-system to override if intentional", absTarget, reason)
+				}
+				// If allowSystem passed, require explicit warning confirmation unless -y is specified
+				if !f.yes {
+					fmt.Printf("\n\x1b[1;38;5;196m⚠ CRITICAL SAFETY WARNING:\x1b[0m\n")
+					fmt.Printf("You are targeting protected %s:\n  \x1b[38;5;220m%s\x1b[0m\n", reason, absTarget)
+					fmt.Printf("Organizing this location may move or alter OS/system files!\n\n")
+					fmt.Print("Are you sure you want to proceed with system path modifications? [y/N]: ")
+					reader := bufio.NewReader(os.Stdin)
+					resp, _ := reader.ReadString('\n')
+					resp = strings.TrimSpace(strings.ToLower(resp))
+					if resp != "y" && resp != "yes" {
+						fmt.Println("Operation aborted for safety.")
+						return nil
+					}
+				}
+			}
+
+			// If custom destination -i / --into is specified, check it too
+			if f.into != "" {
+				absInto, err := filepath.Abs(f.into)
+				if err == nil {
+					if isSys, reason := filesystem.IsSystemPath(absInto); isSys && !f.allowSystem {
+						return fmt.Errorf("access denied: destination '%s' is located in protected %s.\nUse --allow-system to override", absInto, reason)
+					}
+				}
 			}
 
 			// Validate collision policy
@@ -327,6 +360,7 @@ func newSortCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&f.customRules, "rule", nil, "Custom rule e.g. 'type=video && size>1GB -> Videos/Large'")
 	cmd.Flags().BoolVar(&f.followSymlinks, "follow-symlinks", false, "Follow symbolic links")
 	cmd.Flags().StringVar(&f.collision, "collision", "skip", "Collision policy: skip, rename, replace, abort")
+	cmd.Flags().BoolVar(&f.allowSystem, "allow-system", false, "Allow modifications in protected OS or system directories")
 
 	return cmd
 }

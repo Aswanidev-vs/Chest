@@ -109,7 +109,7 @@ func (m *Manager) List() ([]models.HistoryEntry, error) {
 }
 
 // Undo reverses an operation by ID (or latest if id == 0)
-func (m *Manager) Undo(targetID int) (*models.HistoryEntry, int, error) {
+func (m *Manager) Undo(targetID int, allowSystem ...bool) (*models.HistoryEntry, int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -150,6 +150,12 @@ func (m *Manager) Undo(targetID int) (*models.HistoryEntry, int, error) {
 	}
 
 	entry := &store.Entries[entryIndex]
+
+	// 0. Safety check system directory
+	allowSys := len(allowSystem) > 0 && allowSystem[0]
+	if isSys, reason := filesystem.IsSystemPath(entry.Directory); isSys && !allowSys {
+		return nil, 0, fmt.Errorf("access denied: operation #%d targeted protected %s (%s).\nCHEST restricts restoring files in OS and system directories.\nUse --allow-system to override if intentional", entry.ID, reason, entry.Directory)
+	}
 
 	// 1. Safety check all operations before moving anything
 	for _, op := range entry.Operations {

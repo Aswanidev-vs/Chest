@@ -58,6 +58,7 @@ Supports dry-run preview and automatic creation of destination folders.`,
 			"-y, --yes            Skip interactive confirmation prompt",
 			"-c, --collision      Collision policy: skip (default), rename, replace, abort",
 			"-H, --hidden         Include hidden files and folders",
+			"--allow-system       Allow modifications in protected OS or system directories",
 		},
 		Examples: []string{
 			"chest sort                           Sort current directory with default preset",
@@ -106,6 +107,7 @@ into compartments according to chosen presets or rules.`,
 			"-r, --rule <spec>    Custom rule expression to apply",
 			"-d, --debounce <dur> Settle duration before moving file (default: 500ms)",
 			"-n, --dry-run        Print actions without actually moving files",
+			"--allow-system       Allow monitoring and moving in protected system directories",
 		},
 		Examples: []string{
 			"chest watch ~/Downloads             Continuously organize downloads as files arrive",
@@ -116,7 +118,7 @@ into compartments according to chosen presets or rules.`,
 	},
 	"undo": {
 		Name:     "CHEST-UNDO(1) - Operation Rollback",
-		Synopsis: "chest undo [operation-id]",
+		Synopsis: "chest undo [operation-id] [flags]",
 		Description: `Reverses previous file organization operations, restoring moved files back
 to their exact original paths. Checks for destination file existence and source path
 availability before modifying filesystem.
@@ -125,6 +127,7 @@ Subcommand 'cache' manages the undo history store (~/.chest/history.json).
 Use 'chest undo cache' to view cache info or '--clear' to wipe all history.`,
 		Options: []string{
 			"[operation-id]       Specific history ID to undo (default: latest active run)",
+			"--allow-system       Allow undo restoring into protected system directories",
 			"cache                Show undo cache info (stored operations count)",
 			"cache --clear        Permanently delete all undo history",
 		},
