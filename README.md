@@ -80,7 +80,7 @@ make build
 
 ## Documentation & Plugin Development
 
-Comprehensive guides, design details, and instructions on creating custom external plugins are documented in [docs/](docs/index.html) and [docs/documentation.html](docs/documentation.html).
+Comprehensive guides, design details, and instructions on creating custom external plugins are documented in https://aswanidev-vs.github.io/Chest/
 
 ---
 

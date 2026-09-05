@@ -3,135 +3,190 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CHEST — Ultra-Fast File Organization & Intelligence Tool</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta name="description" content="CHEST is a Go CLI for organizing files into compartments: sort, search, watch, undo, with reversible rules and local SQLite intelligence.">
+  <title>chest(1) — local man page</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-  <!-- Navigation -->
-  <nav class="navbar">
-    <div class="brand">
-      <img src="../assests/image.png" alt="CHEST logo" class="brand-icon" onerror="this.style.display='none'">
-      <span>CHEST</span>
-    </div>
-    <div class="nav-links">
-      <a href="#features" class="nav-link">Features</a>
-      <a href="#install" class="nav-link">Install</a>
-      <a href="#commands" class="nav-link">Commands</a>
-      <a href="documentation.html" class="nav-link btn-doc">Documentation & Plugins →</a>
+  <nav class="navbar" aria-label="Primary">
+    <div class="navbar-inner">
+      <a class="brand" href="index.html" aria-label="CHEST — home">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="assets/logo1.png" alt="">
+        </span>
+        <span class="brand-text">
+          chest
+          <small>v0.1.0 · local</small>
+        </span>
+      </a>
+      <div class="nav-links">
+        <a class="nav-link" href="#manpage">overview</a>
+        <a class="nav-link" href="#install">install</a>
+        <a class="nav-link cta" href="documentation.html">docs →</a>
+      </div>
     </div>
   </nav>
 
-  <!-- Hero Section -->
   <header class="hero">
-    <div class="badge">Inspired by the Minecraft Chest • Built with Pure Go</div>
-    <h1>Sort • Index • Find • Automate</h1>
-    <p>Give CHEST a folder, tell it how you want files organized, and CHEST puts them into the right compartments with blazing speed and safety.</p>
+    <div class="container">
+      <p class="hero-tag">A Go CLI · offline-first · reversible</p>
+      <h1 class="hero-title">A command-line <span class="chest">chest</span> for the files you actually have.</h1>
+      <p class="hero-sub">Give <span class="em">chest</span> a folder, tell it how you want the files organized, and chest puts them into the right compartments — with a dry-run, an undo, and a SQLite index that never phones home.</p>
 
-    <div class="hero-actions">
-      <a href="documentation.html" class="btn-primary">Read the Docs</a>
-      <a href="#install" class="btn-secondary">Install Now</a>
-    </div>
-
-    <!-- Terminal Mockup -->
-    <div class="terminal-window">
-      <div class="terminal-header">
-        <div class="terminal-dots">
-          <div class="dot dot-red"></div>
-          <div class="dot dot-yellow"></div>
-          <div class="dot dot-green"></div>
+      <div class="terminal" id="terminal" role="img" aria-label="Terminal showing chest sort dry-run output and a chest search result.">
+        <div class="terminal-head">
+          <span class="terminal-status" aria-hidden="true"><span class="dot"></span> connected</span>
+          <span class="terminal-title">bash — ~/Downloads</span>
         </div>
-        <div class="terminal-title">bash — chest v0.1.0</div>
+        <pre class="terminal-body" id="terminal-body" data-text='<span class="ln"><span class="t-prompt">$</span> <span class="t-cmd bin">chest</span> <span class="t-cmd">sort</span> <span class="t-path">~/Downloads</span> <span class="t-flag">-p</span> downloads <span class="t-flag">--dry-run</span></span><span class="ln"></span><span class="ln"><span class="t-key">CHEST PLAN</span>  <span class="t-comment"># 3 moves, 0 collisions</span></span><span class="ln">  <span class="t-cmd">anime_ep01.mkv</span>     <span class="t-arrow">→</span>  <span class="t-path">Downloads/Videos/</span></span><span class="ln">  <span class="t-cmd">profile_shot.png</span>   <span class="t-arrow">→</span>  <span class="t-path">Downloads/Images/</span></span><span class="ln">  <span class="t-cmd">q3_report.pdf</span>      <span class="t-arrow">→</span>  <span class="t-path">Downloads/Documents/</span></span><span class="ln"></span><span class="ln"><span class="t-warn">3 files would be moved. No changes made (dry run).</span></span><span class="ln"></span><span class="ln"><span class="t-prompt">$</span> <span class="t-cmd bin">chest</span> <span class="t-cmd">search</span> <span class="t-str">"report"</span> <span class="t-flag">-e</span> pdf <span class="t-flag">-c</span> <span class="t-str">"Q3"</span></span><span class="ln"><span class="t-ok">Found 1 match</span> in ~/Downloads</span><span class="ln">  <span class="t-key">[documents]</span> q3_report.pdf <span class="t-dim">(1.2 MB)</span></span><span class="ln">    <span class="t-dim">L14:</span> Revenue growth in <span class="t-num">Q3</span>: <span class="t-num">+28%</span><span class="t-caret"> </span></span>'><span class="sr-only">
+Example session. First, chest sort ~/Downloads -p downloads --dry-run produces a CHEST PLAN of three moves with no collisions:
+anime_ep01.mkv to Downloads/Videos/, profile_shot.png to Downloads/Images/, q3_report.pdf to Downloads/Documents/.
+Dry-run: no changes made. Then chest search report -e pdf -c Q3 finds one match in ~/Downloads:
+documents, q3_report.pdf, 1.2 MB, line 14 — Revenue growth in Q3 plus 28 percent.
+      </span></pre>
       </div>
-      <div class="terminal-body">
-        <span class="prompt-char">$</span> chest sort ~/Downloads -p downloads --dry-run<br>
-        <span class="t-gold">CHEST PLAN</span><br>
-        &nbsp;&nbsp;anime_ep01.mkv <span class="t-dim">→</span> <span class="t-green">Downloads/Videos/</span><br>
-        &nbsp;&nbsp;profile_shot.png <span class="t-dim">→</span> <span class="t-green">Downloads/Images/</span><br>
-        &nbsp;&nbsp;q3_financial_report.pdf <span class="t-dim">→</span> <span class="t-green">Downloads/Documents/</span><br>
-        <span class="t-cyan">3 files would be moved. No changes made (Dry Run).</span><br><br>
-        <span class="prompt-char">$</span> chest search "report" -e pdf -c "Q3"<br>
-        Found <span class="t-green">1</span> match in ~/Downloads<br>
-        &nbsp;&nbsp;[DOCUMENTS] q3_financial_report.pdf (1.2 MB)<br>
-        &nbsp;&nbsp;&nbsp;&nbsp;L14: Revenue Growth in Q3: +28%
+
+      <div class="install" id="install">
+        <p class="install-label">install <span class="dim">— pick one</span></p>
+        <div class="install-tabs" role="tablist" aria-label="Install method">
+          <button class="install-tab is-active" type="button" data-tab="go" role="tab" aria-selected="true">go install</button>
+          <button class="install-tab" type="button" data-tab="shell" role="tab" aria-selected="false">macOS / Linux</button>
+          <button class="install-tab" type="button" data-tab="ps" role="tab" aria-selected="false">Windows</button>
+        </div>
+        <div class="install-panes">
+          <div class="install-pane is-active" data-pane="go" role="tabpanel">
+            <div class="row">
+              <div class="prompt-wrap">
+                <div class="cta-prompt" data-copy="go install github.com/Aswanidev-vs/chest/cmd/chest@latest">
+                  <span class="t-prompt">$</span> <span class="t-cmd">go install</span> <span class="t-path">github.com/Aswanidev-vs/chest/cmd/chest@latest</span>
+                </div>
+                <div class="prompt-caption">Fastest. Requires Go &gt;= 1.22. Drops the binary into <code>$(go env GOBIN)</code> or <code>$(go env GOPATH)/bin</code>.</div>
+              </div>
+              <button class="copy-btn" type="button" data-copy-target>copy</button>
+            </div>
+          </div>
+          <div class="install-pane" data-pane="shell" role="tabpanel" hidden>
+            <div class="row">
+              <div class="prompt-wrap">
+                <div class="cta-prompt" data-copy="curl -sSL https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.sh | bash">
+                  <span class="t-prompt">$</span> <span class="t-cmd">curl</span> <span class="t-flag">-sSL</span> <span class="t-path">https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.sh</span> <span class="t-pipe">|</span> <span class="t-cmd">bash</span>
+                </div>
+                <div class="prompt-caption">Downloads and runs <code>install.sh</code>: checks Go, builds from source with <code>go install</code>, verifies with <code>chest version</code>, prints PATH advice if needed.</div>
+              </div>
+              <button class="copy-btn" type="button" data-copy-target>copy</button>
+            </div>
+          </div>
+          <div class="install-pane" data-pane="ps" role="tabpanel" hidden>
+            <div class="row">
+              <div class="prompt-wrap">
+                <div class="cta-prompt" data-copy="irm https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.ps1 | iex">
+                  <span class="t-prompt">&gt;</span> <span class="t-cmd">irm</span> <span class="t-path">https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.ps1</span> <span class="t-pipe">|</span> <span class="t-cmd">iex</span>
+                </div>
+                <div class="prompt-caption">Downloads and runs <code>install.ps1</code>: same behaviour as the bash installer, but for Windows PowerShell 5.1+.</div>
+              </div>
+              <button class="copy-btn" type="button" data-copy-target>copy</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </header>
 
-  <!-- Key Features Grid -->
-  <section class="features-section" id="features">
-    <div class="section-heading">
-      <h2>Why Developers Choose CHEST</h2>
-      <p>Modern architecture engineered for speed, reliability, and modularity.</p>
-    </div>
+  <!-- ====== The man page (features) ====== -->
+  <section class="section" id="manpage">
+    <div class="container">
+      <article class="manpage">
+        <header class="man-head">
+          <span class="name">chest</span>
+          <span class="section-num">(1)</span>
+          <span class="right">Section 1 · User Commands · v0.1.0</span>
+        </header>
 
-    <div class="features-grid">
-      <div class="feature-card">
-        <div class="feature-icon">⚡</div>
-        <h3>High-Speed Concurrency</h3>
-        <p>Parallel directory traversal powered by <code>fastwalk</code> and microsecond scoring with <code>fzf/src/algo</code>. Processes 100k+ files across multiple CPU cores.</p>
-      </div>
+        <span class="sh">NAME</span>
+        <p class="pp"><span class="em">chest</span> — a command-line chest for the files you actually have. Sort, search, watch, undo. Offline-first, reversible, plugin-extensible.</p>
 
-      <div class="feature-card">
-        <div class="feature-icon">🛡️</div>
-        <h3>100% Reversible & Safe</h3>
-        <p>Dry-run mode, collision detection (skip, rename, replace, abort), and instantaneous rollbacks via <code>chest undo</code>.</p>
-      </div>
+        <figure class="figure">
+          <img src="assets/logo2.png" alt="A pixel-art wooden chest with metallic bands, viewed from a slight angle, on a black field. The mark of the CHEST CLI.">
+          <figcaption>
+            <strong>FIG. 1</strong> — The chest mark, on a black field. The CLI takes its name from the same object: a place where things are kept, not a stream to scroll past.
+          </figcaption>
+        </figure>
 
-      <div class="feature-card">
-        <div class="feature-icon">👁️</div>
-        <h3>Real-Time Watch Mode</h3>
-        <p>Continuous filesystem event watching with <code>chest watch</code>. Automatically detects new downloads or dropped assets and sorts them immediately.</p>
-      </div>
+        <span class="sh">SYNOPSIS</span>
+        <div class="synopsis"><span class="bin">chest</span> <span class="arg">verb</span> [<span class="arg">target</span>] [<span class="opt">flags</span>]</div>
+        <p class="pp">Top-level <em>verb</em> is one of: <strong>sort</strong>, <strong>search</strong>, <strong>watch</strong>, <strong>undo</strong>, <strong>history</strong>, <strong>index</strong>, <strong>stats</strong>, <strong>duplicates</strong>, <strong>analyze</strong>, <strong>man</strong>, <strong>preset</strong>, <strong>plugin</strong>, <strong>clean</strong>, <strong>version</strong>. Run <span class="em">chest man chest</span> for the full grammar.</p>
 
-      <div class="feature-card">
-        <div class="feature-icon">🧠</div>
-        <h3>Local SQLite Intelligence</h3>
-        <p>Stores metadata, storage statistics, and cryptographic SHA256 hashes inside pure-Go SQLite. Detect byte-identical duplicates with zero cloud exposure.</p>
-      </div>
+        <span class="sh">DESCRIPTION</span>
+        <p class="pp">CHEST is a Go CLI for organizing files into compartments. It is designed around three guarantees:</p>
+        <dl class="tp">
+          <dt>1. <span class="opt">Reversible</span></dt><dd>Every move is logged. <code>chest undo</code> reverts the latest run; <code>chest undo &lt;id&gt;</code> reverts a specific one. <code>--dry-run</code> previews without touching anything.</dd>
+          <dt>2. <span class="opt">Local</span></dt><dd>Metadata, storage stats, and SHA-256 hashes live in pure-Go SQLite at <code>~/.chest/index.db</code>. No cloud, no telemetry, no phoning home.</dd>
+          <dt>3. <span class="opt">Concurrent</span></dt><dd>Parallel directory traversal with <code>fastwalk</code> and microsecond scoring borrowed from <code>fzf/src/algo</code>. Walks 100k+ files across every core.</dd>
+        </dl>
 
-      <div class="feature-card">
-        <div class="feature-icon">🔌</div>
-        <h3>Process-Isolated Plugins</h3>
-        <p>Extend CHEST with custom classifiers and rules using HashiCorp's <code>go-plugin</code> over RPC. Your plugins run in independent processes.</p>
-      </div>
+        <span class="sh">CAPABILITIES</span>
+        <dl class="tp">
+          <dt><span class="arg">sort</span> <span class="opt">-p &lt;preset&gt;</span></dt>
+          <dd>Group files by type, size, format, or by a named preset (<code>downloads</code>, <code>media</code>, <code>developer</code>, <code>documents</code>, <code>photos</code>). Combine with <code>--rule</code> for one-off expressions like <code>"type=image &amp;&amp; size&gt;5MB → RAW/"</code>.</dd>
 
-      <div class="feature-card">
-        <div class="feature-icon">🎯</div>
-        <h3>Expressive Rule Engine</h3>
-        <p>Combine type, size, extension, regex, MIME type, and dates with boolean expressions like <code>type=image && size>5MB -> RAW/</code>.</p>
-      </div>
+          <dt><span class="arg">search</span> <span class="arg">pattern</span></dt>
+          <dd>Walk a tree and score filenames with <code>fzf</code>-style fuzzy matching. Add <code>-c</code> to grep inside file contents, <code>-e</code> to filter by extension, <code>-s</code> by size, <code>-j</code> to emit JSON.</dd>
+
+          <dt><span class="arg">watch</span> <span class="arg">dir</span></dt>
+          <dd>Listen to filesystem events with <code>fsnotify</code> and sort new files the moment they land. A debounce guard (default 500ms) prevents half-finished downloads from being classified twice.</dd>
+
+          <dt><span class="arg">undo</span> [<span class="arg">id</span>]</dt>
+          <dd>Revert the latest run, or a specific run by integer id. Combined with <code>chest history</code>, every operation is recoverable. There is no <code>redo</code>; the user can re-run.</dd>
+
+          <dt><span class="arg">index</span> <span class="opt">--hash</span></dt>
+          <dd>Persist file metadata and SHA-256 hashes into <code>~/.chest/index.db</code>. Required for <code>chest duplicates</code> and the storage breakdown in <code>chest stats</code>.</dd>
+
+          <dt><span class="arg">plugin</span> <span class="opt">&lt;verb&gt;</span></dt>
+          <dd>Manage external classifiers and rule bundles that run in separate processes over <code>hashicorp/go-plugin</code> RPC. A buggy plugin cannot touch the planner — only its own subprocess.</dd>
+        </dl>
+
+        <span class="sh">SAFETY</span>
+        <ul>
+          <li><code>--dry-run</code> is the default for new users; pass <code>-y</code> to skip the prompt.</li>
+          <li>Collisions are caught: skip, rename, replace, or abort — never silently overwritten.</li>
+          <li>Every move is recorded in <code>~/.chest/history.db</code> with an integer id.</li>
+          <li>The planner and the index are decoupled. A bad classifier can fail without corrupting the move graph.</li>
+        </ul>
+
+        <span class="sh">ENVIRONMENT</span>
+        <dl class="kv">
+          <dt>CHEST_HOME</dt><dd>Override the state directory. Default: <code>~/.chest</code></dd>
+          <dt>CHEST_PRESET</dt><dd>Default preset when <code>-p</code> is not passed. Default: <code>downloads</code></dd>
+          <dt>NO_COLOR</dt><dd>Disable terminal color. Default: color when stdout is a TTY.</dd>
+        </dl>
+
+        <span class="sh">FILES</span>
+        <dl class="kv">
+          <dt>~/.chest/index.db</dt><dd>SQLite store for metadata, hashes, and stats.</dd>
+          <dt>~/.chest/history.db</dt><dd>SQLite store for the undo log.</dd>
+          <dt>~/.chest/plugins/&lt;name&gt;/</dt><dd>Installed plugin directories, each with a <code>manifest.json</code> and an executable.</dd>
+        </dl>
+
+        <p class="see-also">See also: <a href="documentation.html">chest(1) full reference</a> · <a href="https://github.com/Aswanidev-vs/chest">github.com/Aswanidev-vs/chest</a> · <code>chest man chest</code></p>
+      </article>
     </div>
   </section>
 
-  <!-- Installation Section -->
-  <section class="features-section" id="install">
-    <div class="section-heading">
-      <h2>Instant Installation</h2>
-      <p>Pick the method that matches your environment.</p>
-    </div>
-
-    <div style="max-width: 760px; margin: 0 auto;">
-      <h3 style="margin-bottom: 0.5rem;">Method 1: Go Install (Cross-platform)</h3>
-      <div class="code-block">go install github.com/Aswanidev-vs/chest/cmd/chest@latest</div>
-
-      <h3 style="margin-bottom: 0.5rem;">Method 2: Curl One-Liner (Linux & macOS)</h3>
-      <div class="code-block">curl -sSL https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.sh | bash</div>
-
-      <h3 style="margin-bottom: 0.5rem;">Method 3: PowerShell (Windows)</h3>
-      <div class="code-block">irm https://raw.githubusercontent.com/Aswanidev-vs/chest/main/install.ps1 | iex</div>
-
-      <div style="text-align: center; margin-top: 2rem;">
-        <a href="documentation.html" class="btn-primary">Visit Full Documentation & Plugin Guide →</a>
+  <footer class="site-foot">
+    <div class="container">
+      <div class="foot-grid">
+        <p class="lede">CHEST is a small Go tool that takes the question <em>“where did I put that?”</em> off your hands. Released under the MIT License. Built by people who wanted their Downloads folder to behave.</p>
+        <div class="foot-meta">
+          <span class="ok">v0.1.0</span> · build <span title="git commit">dev</span><br>
+          <a href="https://github.com/Aswanidev-vs/chest">github.com/Aswanidev-vs/chest</a><br>
+          © 2026 CHEST Project
+        </div>
       </div>
     </div>
-  </section>
-
-  <footer>
-    <p>© 2026 CHEST Project. Released under the MIT License.</p>
   </footer>
 
   <script src="script.js"></script>

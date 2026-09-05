@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Aswanidev-vs/chest/internal/classifier"
@@ -427,17 +426,3 @@ func matchesDateCondition(modTime time.Time, cond string) bool {
 	return true
 }
 
-func isHiddenEntry(path, name string, d fs.DirEntry) bool {
-	if strings.HasPrefix(name, ".") && name != "." && name != ".." {
-		return true
-	}
-
-	info, err := d.Info()
-	if err == nil && info.Sys() != nil {
-		if winInfo, ok := info.Sys().(*syscall.Win32FileAttributeData); ok {
-			return winInfo.FileAttributes&syscall.FILE_ATTRIBUTE_HIDDEN != 0
-		}
-	}
-
-	return false
-}

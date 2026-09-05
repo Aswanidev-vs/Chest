@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/Aswanidev-vs/chest/internal/classifier"
 	"github.com/Aswanidev-vs/chest/internal/models"
@@ -174,18 +173,3 @@ func (s *Scanner) isExcluded(path, root, name string, exclusions map[string]stru
 	return false
 }
 
-func isHidden(path, name string, info os.FileInfo) bool {
-	// Standard Unix dotfile check
-	if strings.HasPrefix(name, ".") && name != "." && name != ".." {
-		return true
-	}
-
-	// Windows hidden file attribute check
-	if sys := info.Sys(); sys != nil {
-		if winInfo, ok := sys.(*syscall.Win32FileAttributeData); ok {
-			return winInfo.FileAttributes&syscall.FILE_ATTRIBUTE_HIDDEN != 0
-		}
-	}
-
-	return false
-}
