@@ -1,0 +1,374 @@
+package indexer
+
+import (
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/Aswanidev-vs/chest/internal/classifier"
+	"github.com/charlievieth/fastwalk"
+	_ "github.com/ncruces/go-sqlite3/driver"
+)
+
+// IndexedFile represents a file in SQLite index
+type IndexedFile struct {
+	Path      string    `json:"path"`
+	RelPath   string    `json:"rel_path"`
+	Name      string    `json:"name"`
+	Extension string    `json:"extension"`
+	Size      int64     `json:"size"`
+	ModTime   time.Time `json:"mod_time"`
+	Category  string    `json:"category"`
+	Hash      string    `json:"hash"`
+}
+
+// StatsSummary aggregates storage statistics
+type StatsSummary struct {
+	TotalFiles       int               `json:"total_files"`
+	TotalDirectories int               `json:"total_directories"`
+	TotalSize        int64             `json:"total_size"`
+	CategoryCounts   map[string]int    `json:"category_counts"`
+	CategorySizes    map[string]int64  `json:"category_sizes"`
+	LargestFiles     []IndexedFile     `json:"largest_files"`
+}
+
+// DuplicateGroup represents files sharing identical hash
+type DuplicateGroup struct {
+	Hash       string        `json:"hash"`
+	Size       int64         `json:"size"`
+	WastedSize int64         `json:"wasted_size"`
+	Files      []IndexedFile `json:"files"`
+}
+
+// AnalyzeReport represents read-only intelligence findings
+type AnalyzeReport struct {
+	Stats           StatsSummary     `json:"stats"`
+	DuplicateGroups []DuplicateGroup `json:"duplicate_groups"`
+	OldFiles        []IndexedFile    `json:"old_files"` // Files older than 180 days
+	EmptyFiles      []IndexedFile    `json:"empty_files"`
+}
+
+// Store wraps SQLite index database
+type Store struct {
+	db *sql.DB
+}
+
+// OpenOrCreate opens or creates local sqlite index database
+func OpenOrCreate(customPath ...string) (*Store, error) {
+	dbPath := ""
+	if len(customPath) > 0 && customPath[0] != "" {
+		dbPath = customPath[0]
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		dir := filepath.Join(home, ".chest")
+		_ = os.MkdirAll(dir, 0755)
+		dbPath = filepath.Join(dir, "index.db")
+	}
+
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	schema := `
+	CREATE TABLE IF NOT EXISTS files (
+		path TEXT PRIMARY KEY,
+		rel_path TEXT,
+		name TEXT,
+		extension TEXT,
+		size INTEGER,
+		mod_time INTEGER,
+		category TEXT,
+		hash TEXT
+	);
+	CREATE INDEX IF NOT EXISTS idx_files_category ON files(category);
+	CREATE INDEX IF NOT EXISTS idx_files_size ON files(size);
+	CREATE INDEX IF NOT EXISTS idx_files_hash ON files(hash);
+	`
+	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed creating schema: %w", err)
+	}
+
+	return &Store{db: db}, nil
+}
+
+// Close database connection
+func (s *Store) Close() error {
+	return s.db.Close()
+}
+
+// IndexDirectory scans a target folder and updates index
+func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(current int)) (int, error) {
+	root = filepath.Clean(root)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+	INSERT OR REPLACE INTO files (path, rel_path, name, extension, size, mod_time, category, hash)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	indexedCount := 0
+	walkConf := fastwalk.Config{Follow: false}
+
+	walkFn := func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+
+		name := d.Name()
+		if strings.HasPrefix(name, ".") {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
+		cat := classifier.ClassifyExtension(ext)
+		rel, _ := filepath.Rel(root, path)
+
+		hashVal := ""
+		if computeHashes && info.Size() > 0 && info.Size() < 500*1024*1024 { // Hash files under 500MB
+			h, err := hashFile(path)
+			if err == nil {
+				hashVal = h
+			}
+		}
+
+		_, err = stmt.Exec(
+			path,
+			rel,
+			name,
+			ext,
+			info.Size(),
+			info.ModTime().Unix(),
+			cat,
+			hashVal,
+		)
+		if err != nil {
+			return nil
+		}
+
+		indexedCount++
+		if progress != nil && indexedCount%50 == 0 {
+			progress(indexedCount)
+		}
+
+		return nil
+	}
+
+	if err := fastwalk.Walk(&walkConf, root, walkFn); err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return indexedCount, nil
+}
+
+// GetStats returns storage breakdown across categories and largest files
+func (s *Store) GetStats() (StatsSummary, error) {
+	var summary StatsSummary
+	summary.CategoryCounts = make(map[string]int)
+	summary.CategorySizes = make(map[string]int64)
+
+	// Total count & size
+	row := s.db.QueryRow("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files")
+	if err := row.Scan(&summary.TotalFiles, &summary.TotalSize); err != nil {
+		return summary, err
+	}
+
+	// Category aggregates
+	rows, err := s.db.Query("SELECT category, COUNT(*), SUM(size) FROM files GROUP BY category")
+	if err != nil {
+		return summary, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cat string
+		var count int
+		var size int64
+		if err := rows.Scan(&cat, &count, &size); err == nil {
+			summary.CategoryCounts[cat] = count
+			summary.CategorySizes[cat] = size
+		}
+	}
+
+	// Top 10 largest files
+	topRows, err := s.db.Query("SELECT path, rel_path, name, extension, size, mod_time, category FROM files ORDER BY size DESC LIMIT 10")
+	if err == nil {
+		defer topRows.Close()
+		for topRows.Next() {
+			var f IndexedFile
+			var modUnix int64
+			if err := topRows.Scan(&f.Path, &f.RelPath, &f.Name, &f.Extension, &f.Size, &modUnix, &f.Category); err == nil {
+				f.ModTime = time.Unix(modUnix, 0)
+				summary.LargestFiles = append(summary.LargestFiles, f)
+			}
+		}
+	}
+
+	return summary, nil
+}
+
+// FindDuplicates identifies identical files based on size and hash
+func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
+	// First compute hashes for files with matching sizes that don't have hashes yet
+	sizeRows, err := s.db.Query("SELECT size FROM files WHERE size > 0 GROUP BY size HAVING COUNT(*) > 1")
+	if err != nil {
+		return nil, err
+	}
+	defer sizeRows.Close()
+
+	var candidateSizes []int64
+	for sizeRows.Next() {
+		var sz int64
+		if err := sizeRows.Scan(&sz); err == nil {
+			candidateSizes = append(candidateSizes, sz)
+		}
+	}
+
+	// For candidate sizes, compute hash if missing
+	for _, sz := range candidateSizes {
+		unhashed, err := s.db.Query("SELECT path FROM files WHERE size = ? AND (hash IS NULL OR hash = '')", sz)
+		if err != nil {
+			continue
+		}
+		for unhashed.Next() {
+			var p string
+			if err := unhashed.Scan(&p); err == nil {
+				if h, err := hashFile(p); err == nil {
+					_, _ = s.db.Exec("UPDATE files SET hash = ? WHERE path = ?", h, p)
+				}
+			}
+		}
+		unhashed.Close()
+	}
+
+	// Query groups where hash is identical and occurs > 1 times
+	hashRows, err := s.db.Query("SELECT hash, COUNT(*), size FROM files WHERE hash != '' GROUP BY hash HAVING COUNT(*) > 1")
+	if err != nil {
+		return nil, err
+	}
+	defer hashRows.Close()
+
+	var groups []DuplicateGroup
+	for hashRows.Next() {
+		var hash string
+		var count int
+		var size int64
+		if err := hashRows.Scan(&hash, &count, &size); err != nil {
+			continue
+		}
+
+		g := DuplicateGroup{
+			Hash:       hash,
+			Size:       size,
+			WastedSize: size * int64(count-1),
+		}
+
+		fileRows, err := s.db.Query("SELECT path, rel_path, name, extension, mod_time, category FROM files WHERE hash = ?", hash)
+		if err != nil {
+			continue
+		}
+		for fileRows.Next() {
+			var f IndexedFile
+			var modUnix int64
+			f.Size = size
+			f.Hash = hash
+			if err := fileRows.Scan(&f.Path, &f.RelPath, &f.Name, &f.Extension, &modUnix, &f.Category); err == nil {
+				f.ModTime = time.Unix(modUnix, 0)
+				g.Files = append(g.Files, f)
+			}
+		}
+		fileRows.Close()
+
+		groups = append(groups, g)
+	}
+
+	return groups, nil
+}
+
+// Analyze generates complete intelligence report
+func (s *Store) Analyze() (AnalyzeReport, error) {
+	stats, err := s.GetStats()
+	if err != nil {
+		return AnalyzeReport{}, err
+	}
+
+	dups, _ := s.FindDuplicates()
+
+	var report AnalyzeReport
+	report.Stats = stats
+	report.DuplicateGroups = dups
+
+	// Old files (> 180 days ago)
+	sixMonthsAgo := time.Now().AddDate(0, -6, 0).Unix()
+	oldRows, err := s.db.Query("SELECT path, rel_path, name, extension, size, mod_time, category FROM files WHERE mod_time < ? ORDER BY mod_time ASC LIMIT 20", sixMonthsAgo)
+	if err == nil {
+		defer oldRows.Close()
+		for oldRows.Next() {
+			var f IndexedFile
+			var modUnix int64
+			if err := oldRows.Scan(&f.Path, &f.RelPath, &f.Name, &f.Extension, &f.Size, &modUnix, &f.Category); err == nil {
+				f.ModTime = time.Unix(modUnix, 0)
+				report.OldFiles = append(report.OldFiles, f)
+			}
+		}
+	}
+
+	// Empty files
+	emptyRows, err := s.db.Query("SELECT path, rel_path, name, extension, size, mod_time, category FROM files WHERE size = 0 LIMIT 20")
+	if err == nil {
+		defer emptyRows.Close()
+		for emptyRows.Next() {
+			var f IndexedFile
+			var modUnix int64
+			if err := emptyRows.Scan(&f.Path, &f.RelPath, &f.Name, &f.Extension, &f.Size, &modUnix, &f.Category); err == nil {
+				f.ModTime = time.Unix(modUnix, 0)
+				report.EmptyFiles = append(report.EmptyFiles, f)
+			}
+		}
+	}
+
+	return report, nil
+}
+
+func hashFile(p string) (string, error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}

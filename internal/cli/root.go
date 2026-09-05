@@ -32,4 +32,8 @@ func init() {
 	rootCmd.AddCommand(newPresetCmd())
 	rootCmd.AddCommand(newPluginCmd())
 	rootCmd.AddCommand(newWatchCmd())
+	rootCmd.AddCommand(newIndexCmd())
+	rootCmd.AddCommand(newStatsCmd())
+	rootCmd.AddCommand(newDuplicatesCmd())
+	rootCmd.AddCommand(newAnalyzeCmd())
 }
