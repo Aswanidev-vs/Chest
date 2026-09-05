@@ -34,7 +34,7 @@ param(
     [string]$To
 )
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $ScriptVersion = '0.1.0'
 $Repo          = 'github.com/Aswanidev-vs/chest'
 $Module        = "$Repo/cmd/chest@latest"
