@@ -1,0 +1,4 @@
+=== RUN   TestFindDuplicatesComputesMissingHashes
+--- PASS: TestFindDuplicatesComputesMissingHashes (0.02s)
+PASS
+ok  	github.com/Aswanidev-vs/chest/internal/indexer	0.121s

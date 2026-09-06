@@ -232,7 +232,11 @@ func newAnalyzeCmd() *cobra.Command {
 			defer store.Close()
 
 			if len(args) > 0 {
-				_, _ = indexWithProgress(store, args[0], false)
+				// Hash during the progress-covered walk (computeHashes=true) so the
+				// duplicate phase in Analyze() reads no file contents — it becomes a
+				// pure SQL GROUP BY on stored hashes. Unchanged files are still
+				// skipped incrementally and reuse their cached hash.
+				_, _ = indexWithProgress(store, args[0], true)
 			}
 
 			report, err := store.Analyze()
