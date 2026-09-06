@@ -557,6 +557,10 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 		mu  sync.Mutex
 		out []struct{ path, hash string }
 	)
+	// fresh records the paths hashed in THIS call. Their hashes are guaranteed
+	// accurate (we just read the files), so the re-verify phase can skip them
+	// instead of reading the same contents a second time.
+	fresh := make(map[string]bool)
 	eg.SetLimit(runtime.GOMAXPROCS(0))
 	for _, sz := range candidateSizes {
 		var unhashedPaths []string
@@ -580,6 +584,7 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 				}
 				mu.Lock()
 				out = append(out, struct{ path, hash string }{p, h})
+				fresh[p] = true
 				mu.Unlock()
 				return nil
 			})
@@ -674,6 +679,14 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 			for i, p := range paths {
 				i, p := i, p
 				eg.Go(func() error {
+					// Files we hashed in this exact call are already verified-fresh;
+					// re-reading them would double the I/O for no benefit. Only
+					// DB-loaded hashes (skipped via the size+mtime heuristic on an
+					// earlier run) need re-hashing to guard against stale content.
+					if fresh[p] {
+						confirmed[i] = true
+						return nil
+					}
 					h, err := hashFile(p)
 					if err == nil && h == hgi.hash {
 						confirmed[i] = true
