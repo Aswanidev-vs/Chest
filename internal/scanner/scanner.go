@@ -1,12 +1,15 @@
 package scanner
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/Aswanidev-vs/chest/internal/classifier"
 	"github.com/Aswanidev-vs/chest/internal/models"
+	"github.com/charlievieth/fastwalk"
 )
 
 // ScanOptions configures scanner behavior
@@ -14,8 +17,8 @@ type ScanOptions struct {
 	Recursive      bool
 	IncludeHidden  bool
 	FollowSymlinks bool
-	Exclusions     []string // Names, patterns, or relative directories to skip
-	IgnoreDirs     []string // Output directories being created by CHEST
+	Exclusions     []string                          // Names, patterns, or relative directories to skip
+	IgnoreDirs     []string                          // Output directories being created by CHEST
 	ClassifyFunc   func(filename, ext string) string // Optional: overrides built-in classifier
 }
 
@@ -33,6 +36,7 @@ func New(opts ScanOptions) *Scanner {
 func (s *Scanner) Scan(root string) ([]models.File, error) {
 	root = filepath.Clean(root)
 	var files []models.File
+	var mu sync.Mutex // guards concurrent appends when recursive walks run in parallel
 
 	// Normalize exclusions
 	exclSet := make(map[string]struct{})
@@ -109,6 +113,7 @@ func (s *Scanner) Scan(root string) ([]models.File, error) {
 			cat = classifier.ClassifyExtension(ext)
 		}
 
+		mu.Lock()
 		files = append(files, models.File{
 			Path:      path,
 			RelPath:   relPath,
@@ -120,12 +125,24 @@ func (s *Scanner) Scan(root string) ([]models.File, error) {
 			IsHidden:  isHidden(path, name, info),
 			Category:  cat,
 		})
+		mu.Unlock()
 
 		return nil
 	}
 
 	if s.opts.Recursive {
-		err := filepath.Walk(root, walkFn)
+		conf := fastwalk.Config{Follow: s.opts.FollowSymlinks}
+		combined := func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return nil // Skip unreadable paths safely
+			}
+			info, ierr := d.Info()
+			if ierr != nil {
+				return nil
+			}
+			return walkFn(path, info, nil)
+		}
+		err := fastwalk.Walk(&conf, root, combined)
 		return files, err
 	}
 
@@ -178,4 +195,3 @@ func (s *Scanner) isExcluded(path, root, name string, exclusions map[string]stru
 
 	return false
 }
-

@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/charlievieth/fastwalk"
 	_ "github.com/ncruces/go-sqlite3/driver"
+	"golang.org/x/sync/errgroup"
 )
 
 // IndexedFile represents a file in SQLite index
@@ -251,6 +254,13 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 	root = filepath.Clean(root)
 	exclSet := exclSetFromArgs(exclusions...)
 
+	// Snapshot the current index so unchanged files can be skipped incrementally
+	// instead of being re-hashed on every run.
+	existing, err := s.loadIndexMap()
+	if err != nil {
+		return 0, err
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -266,9 +276,47 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 	}
 	defer stmt.Close()
 
-	indexedCount := int64(0)
-	walkConf := fastwalk.Config{Follow: false}
+	type row struct {
+		path, rel, name, ext, cat string
+		size, modUnix             int64
+		hash                      string
+	}
 
+	const batchSize = 500
+	rowsCh := make(chan row, 2048)
+	var (
+		processedCount int64 // files passed to the walker (drives progress)
+		indexedCount   int64 // rows actually inserted/updated
+	)
+
+	// A single writer goroutine drains rows and flushes them in batches. This
+	// keeps inserts off the fastwalk worker goroutines (which would otherwise
+	// all contend on the one DB connection) and removes per-file commit cost.
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		batch := make([]row, 0, batchSize)
+		defer func() {
+			for _, b := range batch {
+				if _, err := stmt.Exec(b.path, b.rel, b.name, b.ext, b.size, b.modUnix, b.cat, b.hash); err == nil {
+					atomic.AddInt64(&indexedCount, 1)
+				}
+			}
+		}()
+		for r := range rowsCh {
+			batch = append(batch, r)
+			if len(batch) >= batchSize {
+				for _, b := range batch {
+					if _, err := stmt.Exec(b.path, b.rel, b.name, b.ext, b.size, b.modUnix, b.cat, b.hash); err == nil {
+						atomic.AddInt64(&indexedCount, 1)
+					}
+				}
+				batch = batch[:0]
+			}
+		}
+	}()
+
+	walkConf := fastwalk.Config{Follow: false}
 	walkFn := func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -284,11 +332,7 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 			return nil
 		}
 
-		if d.IsDir() {
-			return nil
-		}
-
-		if strings.HasPrefix(name, ".") {
+		if d.IsDir() || strings.HasPrefix(name, ".") {
 			return nil
 		}
 
@@ -296,51 +340,79 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 		if err != nil {
 			return nil
 		}
+		modUnix := info.ModTime().Unix()
+		size := info.Size()
 
+		// Progress tracks files scanned so the bar reaches 100% even when
+		// unchanged files are skipped.
+		processed := atomic.AddInt64(&processedCount, 1)
+		if progress != nil && processed%50 == 0 {
+			progress(int(processed))
+		}
+
+		// Incremental skip: if size + mtime match the index and we already have
+		// a hash (or don't need one), keep the existing row untouched.
+		if meta, ok := existing[path]; ok && meta.size == size && meta.modUnix == modUnix {
+			if !computeHashes || meta.hash != "" {
+				return nil
+			}
+		}
+
+		rel, _ := filepath.Rel(root, path)
 		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
 		cat := classifier.ClassifyExtension(ext)
-		rel, _ := filepath.Rel(root, path)
 
 		hashVal := ""
-		if computeHashes && info.Size() > 0 && info.Size() < 500*1024*1024 { // Hash files under 500MB
-			h, err := hashFile(path)
-			if err == nil {
+		if computeHashes && size > 0 && size < 500*1024*1024 { // Hash files under 500MB
+			if h, err := hashFile(path); err == nil {
 				hashVal = h
 			}
 		}
 
-		_, err = stmt.Exec(
-			path,
-			rel,
-			name,
-			ext,
-			info.Size(),
-			info.ModTime().Unix(),
-			cat,
-			hashVal,
-		)
-		if err != nil {
-			return nil
-		}
-
-		// walkFn runs concurrently; guard the shared counter.
-		atomic.AddInt64(&indexedCount, 1)
-		if progress != nil && atomic.LoadInt64(&indexedCount)%50 == 0 {
-			progress(int(atomic.LoadInt64(&indexedCount)))
-		}
-
+		rowsCh <- row{path, rel, name, ext, cat, size, modUnix, hashVal}
 		return nil
 	}
 
 	if err := fastwalk.Walk(&walkConf, root, walkFn); err != nil {
+		close(rowsCh)
+		<-writerDone
 		return 0, err
 	}
+	close(rowsCh)
+	<-writerDone
 
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 
 	return int(indexedCount), nil
+}
+
+// fileMeta stores the fields used to detect whether a file changed.
+type fileMeta struct {
+	size    int64
+	modUnix int64
+	hash    string
+}
+
+// loadIndexMap loads the current index keyed by absolute path for incremental
+// scanning decisions.
+func (s *Store) loadIndexMap() (map[string]fileMeta, error) {
+	rows, err := s.db.Query("SELECT path, size, mod_time, COALESCE(hash, '') FROM files")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	m := make(map[string]fileMeta)
+	for rows.Next() {
+		var p string
+		var meta fileMeta
+		if err := rows.Scan(&p, &meta.size, &meta.modUnix, &meta.hash); err == nil {
+			m[p] = meta
+		}
+	}
+	return m, rows.Err()
 }
 
 // isExcludedPath reports whether a walk entry matches an exclusion. Exclusions
@@ -479,7 +551,13 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 		}
 	}
 
-	// For candidate sizes, compute hash if missing
+	// For candidate sizes, compute hash if missing (in parallel, bounded workers).
+	var (
+		eg  errgroup.Group
+		mu  sync.Mutex
+		out []struct{ path, hash string }
+	)
+	eg.SetLimit(runtime.GOMAXPROCS(0))
 	for _, sz := range candidateSizes {
 		var unhashedPaths []string
 		unhashed, err := s.db.Query("SELECT path FROM files WHERE size = ? AND (hash IS NULL OR hash = '')", sz)
@@ -494,9 +572,47 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 		}
 
 		for _, p := range unhashedPaths {
-			if h, err := hashFile(p); err == nil {
-				_, _ = s.db.Exec("UPDATE files SET hash = ? WHERE path = ?", h, p)
+			p := p
+			eg.Go(func() error {
+				h, err := hashFile(p)
+				if err != nil {
+					return nil // skip unreadable files, matching prior behavior
+				}
+				mu.Lock()
+				out = append(out, struct{ path, hash string }{p, h})
+				mu.Unlock()
+				return nil
+			})
+		}
+	}
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Persist computed hashes in a single transaction (serial write).
+	if len(out) > 0 {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return nil, err
+		}
+		stmt, err := tx.Prepare("UPDATE files SET hash = ? WHERE path = ?")
+		if err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+		for _, r := range out {
+			if _, err := stmt.Exec(r.hash, r.path); err != nil {
+				tx.Rollback()
+				stmt.Close()
+				return nil, err
 			}
+		}
+		if err := stmt.Close(); err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
 		}
 	}
 

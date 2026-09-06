@@ -180,3 +180,52 @@ func TestCountFiles(t *testing.T) {
 		t.Errorf("CountFiles (%d) disagrees with IndexDirectory (%d)", n, indexed)
 	}
 }
+
+func TestIndexIncremental(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "incr.db")
+
+	store, err := OpenOrCreate(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	root := filepath.Join(tempDir, "root")
+	_ = os.MkdirAll(root, 0755)
+	f := filepath.Join(root, "a.txt")
+	_ = os.WriteFile(f, []byte("hello"), 0644)
+
+	// First run: all files are new.
+	n1, err := store.IndexDirectory(root, true, nil)
+	if err != nil {
+		t.Fatalf("first index failed: %v", err)
+	}
+	if n1 != 1 {
+		t.Fatalf("expected 1 new file on first index, got %d", n1)
+	}
+
+	// Second run: unchanged file should be skipped entirely (incremental).
+	n2, err := store.IndexDirectory(root, true, nil)
+	if err != nil {
+		t.Fatalf("second index failed: %v", err)
+	}
+	if n2 != 0 {
+		t.Errorf("expected 0 new files on incremental re-run, got %d", n2)
+	}
+
+	// The persisted hash must still make duplicates detectable.
+	if _, err := store.FindDuplicates(); err != nil {
+		t.Fatalf("FindDuplicates failed: %v", err)
+	}
+
+	// Changing content (and thus size) should be detected on the next run.
+	_ = os.WriteFile(f, []byte("hello world!"), 0644)
+	n3, err := store.IndexDirectory(root, true, nil)
+	if err != nil {
+		t.Fatalf("third index failed: %v", err)
+	}
+	if n3 != 1 {
+		t.Errorf("expected 1 new file after content change, got %d", n3)
+	}
+}
