@@ -342,20 +342,21 @@
           </table>
 
           <h3 id="cmd-index">chest index & clean</h3>
-          <p>Index file paths and hashes into SQLite for fast duplicate discovery:</p>
+          <p>Index file paths and hashes into SQLite for fast duplicate discovery. Indexing is <em>incremental</em> (unchanged files are skipped), runs in parallel across CPU cores, and shows a live progress bar:</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
-            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">index</span> <span class="t-path">~/Documents</span> <span class="t-flag">--hash</span>    <span class="t-comment"># Incremental SHA-256 calculation</span>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">index</span> <span class="t-path">~/Documents</span> <span class="t-flag">--hash</span>    <span class="t-comment"># Incremental parallel SHA-256 with progress bar</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">clean</span>                       <span class="t-comment"># Prune deleted files from local index</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">clean</span> <span class="t-flag">--all</span>                 <span class="t-comment"># Reset index database completely</span></code></pre>
           </div>
 
           <h3 id="cmd-intel">stats, duplicates & analyze</h3>
-          <p>Storage intelligence commands:</p>
+          <p>Storage intelligence commands — duplicate detection re-verifies hashes and supports <code>--except</code> to prune noisy directories:</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-path">~/Projects</span>            <span class="t-comment"># Category and size breakdown</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Downloads</span>      <span class="t-comment"># Locate byte-for-byte duplicates</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Projects</span> <span class="t-flag">--except</span> node_modules,venv <span class="t-comment"># Skip noisy dirs</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">analyze</span> <span class="t-path">~/Documents</span>         <span class="t-comment"># Find zero-byte files and stale items (&gt;180 days)</span></code></pre>
           </div>
 
