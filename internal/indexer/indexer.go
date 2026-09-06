@@ -294,24 +294,24 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 	// all contend on the one DB connection) and removes per-file commit cost.
 	writerDone := make(chan struct{})
 	go func() {
-		defer close(writerDone)
 		batch := make([]row, 0, batchSize)
-		defer func() {
+		flush := func() {
 			for _, b := range batch {
 				if _, err := stmt.Exec(b.path, b.rel, b.name, b.ext, b.size, b.modUnix, b.cat, b.hash); err == nil {
 					atomic.AddInt64(&indexedCount, 1)
 				}
 			}
-		}()
+			batch = batch[:0]
+		}
+		// Deferred calls run LIFO, so flush() is guaranteed to finish (and
+		// indexedCount to be accurate) before writerDone closes. The reader
+		// also must not Commit until the final batch is on the connection.
+		defer close(writerDone)
+		defer flush()
 		for r := range rowsCh {
 			batch = append(batch, r)
 			if len(batch) >= batchSize {
-				for _, b := range batch {
-					if _, err := stmt.Exec(b.path, b.rel, b.name, b.ext, b.size, b.modUnix, b.cat, b.hash); err == nil {
-						atomic.AddInt64(&indexedCount, 1)
-					}
-				}
-				batch = batch[:0]
+				flush()
 			}
 		}
 	}()
@@ -648,6 +648,8 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 		if err != nil {
 			continue
 		}
+		var members []IndexedFile
+		var paths []string
 		for fileRows.Next() {
 			var f IndexedFile
 			var modUnix int64
@@ -655,12 +657,44 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 			f.Hash = hgi.hash
 			if err := fileRows.Scan(&f.Path, &f.RelPath, &f.Name, &f.Extension, &modUnix, &f.Category); err == nil {
 				f.ModTime = time.Unix(modUnix, 0)
-				g.Files = append(g.Files, f)
+				members = append(members, f)
+				paths = append(paths, f.Path)
 			}
 		}
 		fileRows.Close()
 
-		groups = append(groups, g)
+		// Re-verify the grouped files actually share identical content right now.
+		// A file can keep the same size and mtime yet change content, which the
+		// incremental scan heuristic would otherwise miss. Re-hashing group
+		// members guarantees we never report a false duplicate.
+		confirmed := make([]bool, len(paths))
+		if len(paths) > 1 {
+			eg := errgroup.Group{}
+			eg.SetLimit(runtime.GOMAXPROCS(0))
+			for i, p := range paths {
+				i, p := i, p
+				eg.Go(func() error {
+					h, err := hashFile(p)
+					if err == nil && h == hgi.hash {
+						confirmed[i] = true
+					}
+					return nil
+				})
+			}
+			_ = eg.Wait()
+		}
+
+		for i, f := range members {
+			if confirmed[i] {
+				g.Files = append(g.Files, f)
+			}
+		}
+
+		// Only report groups that still have 2+ identical files.
+		if len(g.Files) >= 2 {
+			g.WastedSize = g.Size * int64(len(g.Files)-1)
+			groups = append(groups, g)
+		}
 	}
 
 	return groups, nil

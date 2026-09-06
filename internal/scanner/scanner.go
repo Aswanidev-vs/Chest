@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -143,7 +144,14 @@ func (s *Scanner) Scan(root string) ([]models.File, error) {
 			return walkFn(path, info, nil)
 		}
 		err := fastwalk.Walk(&conf, root, combined)
-		return files, err
+		if err != nil {
+			return nil, err
+		}
+		// fastwalk traverses in parallel, so results are unordered. Sort by path
+		// to keep planner/output ordering deterministic (matches filepath.Walk's
+		// lexical order and makes collision-rename assignments stable).
+		sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+		return files, nil
 	}
 
 	// Non-recursive scan of root only

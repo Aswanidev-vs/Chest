@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestIndexerStore(t *testing.T) {
@@ -227,5 +228,57 @@ func TestIndexIncremental(t *testing.T) {
 	}
 	if n3 != 1 {
 		t.Errorf("expected 1 new file after content change, got %d", n3)
+	}
+}
+
+// TestDuplicateHashReverify proves FindDuplicates re-hashes group members, so a
+// file whose content changed while keeping the same size and mtime (which the
+// incremental heuristic would skip) is not falsely reported as a duplicate.
+func TestDuplicateHashReverify(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "reverify.db")
+
+	store, err := OpenOrCreate(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	root := filepath.Join(tempDir, "root")
+	f1 := filepath.Join(root, "a.txt")
+	f2 := filepath.Join(root, "b.txt")
+	_ = os.MkdirAll(root, 0755)
+	_ = os.WriteFile(f1, []byte("AAAA"), 0644)
+	_ = os.WriteFile(f2, []byte("AAAA"), 0644)
+
+	// Index both identical files with hashes.
+	if _, err := store.IndexDirectory(root, true, nil); err != nil {
+		t.Fatalf("index failed: %v", err)
+	}
+	dups, err := store.FindDuplicates()
+	if err != nil {
+		t.Fatalf("FindDuplicates failed: %v", err)
+	}
+	if len(dups) != 1 || len(dups[0].Files) != 2 {
+		t.Fatalf("expected 1 duplicate group of 2 files, got %d groups", len(dups))
+	}
+
+	// Change one file's content but keep size AND mtime unchanged, simulating
+	// what the incremental heuristic would miss.
+	orig := time.Now()
+	_ = os.WriteFile(f2, []byte("BBBB"), 0644) // same length (4 bytes)
+	_ = os.Chtimes(f2, orig, orig)             // reset mtime to original
+	_ = os.Chtimes(f1, orig, orig)             // keep f1 mtime matching stored
+	if _, err := store.IndexDirectory(root, true, nil); err != nil {
+		t.Fatalf("re-index failed: %v", err)
+	}
+
+	// Even though size+mtime match, re-verification must drop the changed file.
+	dups, err = store.FindDuplicates()
+	if err != nil {
+		t.Fatalf("FindDuplicates after change failed: %v", err)
+	}
+	if len(dups) != 0 {
+		t.Fatalf("expected 0 duplicate groups after content divergence, got %d", len(dups))
 	}
 }
