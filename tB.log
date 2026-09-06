@@ -1,4 +1,0 @@
-=== RUN   TestIndexDirectoryParallelProgress
---- PASS: TestIndexDirectoryParallelProgress (0.27s)
-PASS
-ok  	github.com/Aswanidev-vs/chest/internal/indexer	0.436s
