@@ -374,16 +374,25 @@ func newSortCmd() *cobra.Command {
 
 			// Execute Plan
 			histMgr, _ := history.DefaultManager()
+			var bar *progressBar
+			if !f.verbose && !f.quiet {
+				bar = newProgressBar(len(plan.Operations))
+			}
 			progressFn := func(op models.Operation, idx, total int) {
 				if f.verbose {
 					relSrc, _ := filepath.Rel(absTarget, op.Source)
 					relDst, _ := filepath.Rel(absTarget, op.Destination)
 					fmt.Printf("[MATCH] %s -> %s (%s)\n", relSrc, relDst, op.Reason)
 					fmt.Printf("[MOVE] %s\n", filepath.Base(op.Source))
+				} else if bar != nil {
+					bar.advance(idx)
 				}
 			}
 
 			result, err := organizer.Execute(plan, histMgr, progressFn)
+			if bar != nil {
+				bar.finish()
+			}
 			if err != nil {
 				return fmt.Errorf("execution error: %w", err)
 			}
