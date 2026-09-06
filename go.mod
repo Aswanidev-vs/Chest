@@ -10,6 +10,8 @@ require (
 	github.com/junegunn/fzf v0.74.4-0.20260831100935-52f4319a72c1
 	github.com/ncruces/go-sqlite3 v0.35.4
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.9
+	golang.org/x/sync v0.22.0
 	golang.org/x/term v0.45.0
 )
 
@@ -26,6 +28,7 @@ require (
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/oklog/run v1.1.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	golang.org/x/net v0.38.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

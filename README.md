@@ -53,12 +53,12 @@ make build
   - Exact duplicate file detection with `chest duplicates`.
   - Stale and zero-byte file reports with `chest analyze`.
   - Cache management with `chest index --clear` and `chest clean`.
-- **Local Indexing & Analysis**:
-  - Incremental metadata and SHA256 hashing backed by pure-Go SQLite (`ncruces/go-sqlite3`).
-  - Storage analytics with `chest stats`.
-  - Exact duplicate file detection with `chest duplicates`.
-  - Stale and zero-byte file reports with `chest analyze`.
-  - Cache management with `chest index --clear`, `chest undo cache --clear`, and interactive `chest clean`.
+- **Parallel Performance & Live Feedback**:
+  - Incremental indexing skips unchanged files (using `size + mtime`) so repeated runs are near-instant.
+  - Hashing and directory traversal run in parallel across CPU cores (`errgroup` + `fastwalk`), and SQLite writes are batched in transactions.
+  - Live in-place progress bars on the long-wait commands: `index`, `duplicates`, `analyze`, and `sort`.
+- **Exclusion Flags (`--except` / `--exclude`)**:
+  - Prune noisy directories or globs (e.g. `node_modules`, `venv`, `.git`) before traversal: `chest duplicates ~/Projects --except node_modules,venv,.git`.
 - **System Path Protection Guard**:
   - Automatic safeguards preventing modification to OS root volumes (`/`, `C:\`) and system paths (`C:\Windows`, `C:\Program Files`, `/etc`, `/usr`, `/var`, etc.).
   - Protected paths remain completely accessible for read-only commands (`search`, `stats`, `duplicates`, `analyze`, `index`).
@@ -77,9 +77,9 @@ make build
 | `chest history` | View previous operations log | `chest history` |
 | `chest undo` | Revert latest operation or specific ID, auto-cleaning empty created directories | `chest undo` or `chest undo 3` |
 | `chest undo cache` | Inspect undo cache or wipe all history (`--clear`) | `chest undo cache --clear` |
-| `chest index` | Index directory metadata into local SQLite | `chest index ~/Documents --hash` |
+| `chest index` | Index directory metadata into local SQLite (incremental, parallel) | `chest index ~/Documents --hash` |
 | `chest stats` | Display storage consumption and category breakdown | `chest stats` |
-| `chest duplicates` | Locate duplicate files using cryptographic hashes | `chest duplicates ~/Downloads` |
+| `chest duplicates` | Locate duplicate files using content hashes (`--except` to skip dirs/globs) | `chest duplicates ~/Downloads --except node_modules,venv` |
 | `chest analyze` | Read-only audit of storage distribution and old files | `chest analyze ~/Downloads` |
 | `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |
 | `chest clean` | Clear cached SQLite index with confirmation (`-y` to skip, `--all` for DB) | `chest clean -y` |

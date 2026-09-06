@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestIndexerStore(t *testing.T) {
@@ -66,5 +67,218 @@ func TestIndexerStore(t *testing.T) {
 	}
 	if len(report.DuplicateGroups) != 1 {
 		t.Errorf("Expected 1 duplicate group in analyze report")
+	}
+}
+
+func TestIndexDirectoryExcept(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_except.db")
+
+	store, err := OpenOrCreate(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	// Keep/Root files
+	rootDir := filepath.Join(tempDir, "root")
+	_ = os.MkdirAll(filepath.Join(rootDir, "keep_sub"), 0755)
+
+	// Files that should be indexed
+	dup1 := filepath.Join(rootDir, "dup.txt")
+	dup2 := filepath.Join(rootDir, "keep_sub", "dup.txt")
+	_ = os.WriteFile(dup1, []byte("same content abc"), 0644)
+	_ = os.WriteFile(dup2, []byte("same content abc"), 0644)
+
+	// Files that must be skipped via exclusion
+	_ = os.MkdirAll(filepath.Join(rootDir, "node_modules", "pkg"), 0755)
+	_ = os.WriteFile(filepath.Join(rootDir, "node_modules", "pkg", "index.js"), []byte("node dep x"), 0644)
+	_ = os.WriteFile(filepath.Join(rootDir, "node_modules", "lock"), []byte("node dep y"), 0644)
+	_ = os.MkdirAll(filepath.Join(rootDir, "venv"), 0755)
+	_ = os.WriteFile(filepath.Join(rootDir, "venv", "site.py"), []byte("venv lib z"), 0644)
+	_ = os.WriteFile(filepath.Join(rootDir, ".gitkeep"), []byte("hidden file"), 0644)
+
+	count, err := store.IndexDirectory(rootDir, true, nil, []string{"node_modules,venv"})
+	if err != nil {
+		t.Fatalf("Failed to index with exclusions: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("Expected 2 indexed files (excluded dirs pruned), got %d", count)
+	}
+
+	// Ensure excluded files are not in the index.
+	for _, excluded := range []string{
+		filepath.Join(rootDir, "node_modules", "pkg", "index.js"),
+		filepath.Join(rootDir, "node_modules", "lock"),
+		filepath.Join(rootDir, "venv", "site.py"),
+	} {
+		var c int
+		err := store.db.QueryRow("SELECT COUNT(*) FROM files WHERE path = ?", excluded).Scan(&c)
+		if err != nil || c != 0 {
+			t.Errorf("Expected excluded path %s to be absent, got %d (err=%v)", excluded, c, err)
+		}
+	}
+
+	// Glob-style exclusion of a file name, on a fresh root.
+	globDir := filepath.Join(tempDir, "glob_root")
+	_ = os.MkdirAll(globDir, 0755)
+	_ = os.WriteFile(filepath.Join(globDir, "a.txt"), []byte("aaa"), 0644)
+	_ = os.WriteFile(filepath.Join(globDir, "b.txt"), []byte("bbb"), 0644)
+	_ = os.WriteFile(filepath.Join(globDir, "c.go"), []byte("ccc"), 0644)
+
+	count, err = store.IndexDirectory(globDir, false, nil, []string{"*.txt"})
+	if err != nil {
+		t.Fatalf("Failed indexing with glob exclusion: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("Expected 1 indexed file when excluding *.txt (c.go), got %d", count)
+	}
+}
+
+func TestCountFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_count.db")
+
+	store, err := OpenOrCreate(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	root := filepath.Join(tempDir, "root")
+	_ = os.MkdirAll(filepath.Join(root, "sub"), 0755)
+	_ = os.MkdirAll(filepath.Join(root, "node_modules", "pkg"), 0755)
+
+	_ = os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0644)
+	_ = os.WriteFile(filepath.Join(root, "sub", "b.txt"), []byte("b"), 0644)
+	_ = os.WriteFile(filepath.Join(root, ".hidden"), []byte("h"), 0644)
+	_ = os.WriteFile(filepath.Join(root, "node_modules", "pkg", "x.js"), []byte("x"), 0644)
+
+	// No exclusions: hidden file skipped, node_modules counted.
+	n, err := store.CountFiles(root)
+	if err != nil {
+		t.Fatalf("CountFiles failed: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("Expected 3 files (a.txt, b.txt, x.js), got %d", n)
+	}
+
+	// Excluded node_modules: pruned entirely.
+	n, err = store.CountFiles(root, []string{"node_modules"})
+	if err != nil {
+		t.Fatalf("CountFiles with exclusions failed: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("Expected 2 files with node_modules excluded, got %d", n)
+	}
+
+	// CountFiles must agree with what IndexDirectory actually indexes.
+	indexed, err := store.IndexDirectory(root, false, nil, []string{"node_modules"})
+	if err != nil {
+		t.Fatalf("IndexDirectory failed: %v", err)
+	}
+	if indexed != n {
+		t.Errorf("CountFiles (%d) disagrees with IndexDirectory (%d)", n, indexed)
+	}
+}
+
+func TestIndexIncremental(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "incr.db")
+
+	store, err := OpenOrCreate(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	root := filepath.Join(tempDir, "root")
+	_ = os.MkdirAll(root, 0755)
+	f := filepath.Join(root, "a.txt")
+	_ = os.WriteFile(f, []byte("hello"), 0644)
+
+	// First run: all files are new.
+	n1, err := store.IndexDirectory(root, true, nil)
+	if err != nil {
+		t.Fatalf("first index failed: %v", err)
+	}
+	if n1 != 1 {
+		t.Fatalf("expected 1 new file on first index, got %d", n1)
+	}
+
+	// Second run: unchanged file should be skipped entirely (incremental).
+	n2, err := store.IndexDirectory(root, true, nil)
+	if err != nil {
+		t.Fatalf("second index failed: %v", err)
+	}
+	if n2 != 0 {
+		t.Errorf("expected 0 new files on incremental re-run, got %d", n2)
+	}
+
+	// The persisted hash must still make duplicates detectable.
+	if _, err := store.FindDuplicates(); err != nil {
+		t.Fatalf("FindDuplicates failed: %v", err)
+	}
+
+	// Changing content (and thus size) should be detected on the next run.
+	_ = os.WriteFile(f, []byte("hello world!"), 0644)
+	n3, err := store.IndexDirectory(root, true, nil)
+	if err != nil {
+		t.Fatalf("third index failed: %v", err)
+	}
+	if n3 != 1 {
+		t.Errorf("expected 1 new file after content change, got %d", n3)
+	}
+}
+
+// TestDuplicateHashReverify proves FindDuplicates re-hashes group members, so a
+// file whose content changed while keeping the same size and mtime (which the
+// incremental heuristic would skip) is not falsely reported as a duplicate.
+func TestDuplicateHashReverify(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "reverify.db")
+
+	store, err := OpenOrCreate(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	root := filepath.Join(tempDir, "root")
+	f1 := filepath.Join(root, "a.txt")
+	f2 := filepath.Join(root, "b.txt")
+	_ = os.MkdirAll(root, 0755)
+	_ = os.WriteFile(f1, []byte("AAAA"), 0644)
+	_ = os.WriteFile(f2, []byte("AAAA"), 0644)
+
+	// Index both identical files with hashes.
+	if _, err := store.IndexDirectory(root, true, nil); err != nil {
+		t.Fatalf("index failed: %v", err)
+	}
+	dups, err := store.FindDuplicates()
+	if err != nil {
+		t.Fatalf("FindDuplicates failed: %v", err)
+	}
+	if len(dups) != 1 || len(dups[0].Files) != 2 {
+		t.Fatalf("expected 1 duplicate group of 2 files, got %d groups", len(dups))
+	}
+
+	// Change one file's content but keep size AND mtime unchanged, simulating
+	// what the incremental heuristic would miss.
+	orig := time.Now()
+	_ = os.WriteFile(f2, []byte("BBBB"), 0644) // same length (4 bytes)
+	_ = os.Chtimes(f2, orig, orig)             // reset mtime to original
+	_ = os.Chtimes(f1, orig, orig)             // keep f1 mtime matching stored
+	if _, err := store.IndexDirectory(root, true, nil); err != nil {
+		t.Fatalf("re-index failed: %v", err)
+	}
+
+	// Even though size+mtime match, re-verification must drop the changed file.
+	dups, err = store.FindDuplicates()
+	if err != nil {
+		t.Fatalf("FindDuplicates after change failed: %v", err)
+	}
+	if len(dups) != 0 {
+		t.Fatalf("expected 0 duplicate groups after content divergence, got %d", len(dups))
 	}
 }

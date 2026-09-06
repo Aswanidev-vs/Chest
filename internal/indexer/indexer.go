@@ -8,13 +8,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Aswanidev-vs/chest/internal/classifier"
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/charlievieth/fastwalk"
 	_ "github.com/ncruces/go-sqlite3/driver"
+	"golang.org/x/sync/errgroup"
 )
 
 // IndexedFile represents a file in SQLite index
@@ -31,12 +35,12 @@ type IndexedFile struct {
 
 // StatsSummary aggregates storage statistics
 type StatsSummary struct {
-	TotalFiles       int               `json:"total_files"`
-	TotalDirectories int               `json:"total_directories"`
-	TotalSize        int64             `json:"total_size"`
-	CategoryCounts   map[string]int    `json:"category_counts"`
-	CategorySizes    map[string]int64  `json:"category_sizes"`
-	LargestFiles     []IndexedFile     `json:"largest_files"`
+	TotalFiles       int              `json:"total_files"`
+	TotalDirectories int              `json:"total_directories"`
+	TotalSize        int64            `json:"total_size"`
+	CategoryCounts   map[string]int   `json:"category_counts"`
+	CategorySizes    map[string]int64 `json:"category_sizes"`
+	LargestFiles     []IndexedFile    `json:"largest_files"`
 }
 
 // DuplicateGroup represents files sharing identical hash
@@ -54,7 +58,6 @@ type AnalyzeReport struct {
 	OldFiles        []IndexedFile    `json:"old_files"` // Files older than 180 days
 	EmptyFiles      []IndexedFile    `json:"empty_files"`
 }
-
 
 // OpenOrCreate opens or creates local sqlite index database
 func OpenOrCreate(customPath ...string) (*Store, error) {
@@ -244,9 +247,19 @@ func (s *Store) MarkHistoryUndone(id int) error {
 	return err
 }
 
-// IndexDirectory scans a target folder and updates index
-func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(current int)) (int, error) {
+// IndexDirectory scans a target folder and updates index.
+// exclusions is a list of comma-separated names/globs (dirs or files) to skip,
+// matched against each entry name and its path relative to root.
+func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(current int), exclusions ...[]string) (int, error) {
 	root = filepath.Clean(root)
+	exclSet := exclSetFromArgs(exclusions...)
+
+	// Snapshot the current index so unchanged files can be skipped incrementally
+	// instead of being re-hashed on every run.
+	existing, err := s.loadIndexMap()
+	if err != nil {
+		return 0, err
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -263,16 +276,63 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 	}
 	defer stmt.Close()
 
-	indexedCount := 0
-	walkConf := fastwalk.Config{Follow: false}
+	type row struct {
+		path, rel, name, ext, cat string
+		size, modUnix             int64
+		hash                      string
+	}
 
+	const batchSize = 500
+	rowsCh := make(chan row, 2048)
+	var (
+		processedCount int64 // files passed to the walker (drives progress)
+		indexedCount   int64 // rows actually inserted/updated
+	)
+
+	// A single writer goroutine drains rows and flushes them in batches. This
+	// keeps inserts off the fastwalk worker goroutines (which would otherwise
+	// all contend on the one DB connection) and removes per-file commit cost.
+	writerDone := make(chan struct{})
+	go func() {
+		batch := make([]row, 0, batchSize)
+		flush := func() {
+			for _, b := range batch {
+				if _, err := stmt.Exec(b.path, b.rel, b.name, b.ext, b.size, b.modUnix, b.cat, b.hash); err == nil {
+					atomic.AddInt64(&indexedCount, 1)
+				}
+			}
+			batch = batch[:0]
+		}
+		// Deferred calls run LIFO, so flush() is guaranteed to finish (and
+		// indexedCount to be accurate) before writerDone closes. The reader
+		// also must not Commit until the final batch is on the connection.
+		defer close(writerDone)
+		defer flush()
+		for r := range rowsCh {
+			batch = append(batch, r)
+			if len(batch) >= batchSize {
+				flush()
+			}
+		}
+	}()
+
+	walkConf := fastwalk.Config{Follow: false}
 	walkFn := func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
 			return nil
 		}
 
 		name := d.Name()
-		if strings.HasPrefix(name, ".") {
+
+		// Prune excluded directories entirely instead of descending into them.
+		if isExcludedPath(name, root, path, exclSet) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if d.IsDir() || strings.HasPrefix(name, ".") {
 			return nil
 		}
 
@@ -280,50 +340,152 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 		if err != nil {
 			return nil
 		}
+		modUnix := info.ModTime().Unix()
+		size := info.Size()
 
+		// Progress tracks files scanned so the bar reaches 100% even when
+		// unchanged files are skipped.
+		processed := atomic.AddInt64(&processedCount, 1)
+		if progress != nil && processed%50 == 0 {
+			progress(int(processed))
+		}
+
+		// Incremental skip: if size + mtime match the index and we already have
+		// a hash (or don't need one), keep the existing row untouched.
+		if meta, ok := existing[path]; ok && meta.size == size && meta.modUnix == modUnix {
+			if !computeHashes || meta.hash != "" {
+				return nil
+			}
+		}
+
+		rel, _ := filepath.Rel(root, path)
 		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
 		cat := classifier.ClassifyExtension(ext)
-		rel, _ := filepath.Rel(root, path)
 
 		hashVal := ""
-		if computeHashes && info.Size() > 0 && info.Size() < 500*1024*1024 { // Hash files under 500MB
-			h, err := hashFile(path)
-			if err == nil {
+		if computeHashes && size > 0 && size < 500*1024*1024 { // Hash files under 500MB
+			if h, err := hashFile(path); err == nil {
 				hashVal = h
 			}
 		}
 
-		_, err = stmt.Exec(
-			path,
-			rel,
-			name,
-			ext,
-			info.Size(),
-			info.ModTime().Unix(),
-			cat,
-			hashVal,
-		)
-		if err != nil {
-			return nil
-		}
-
-		indexedCount++
-		if progress != nil && indexedCount%50 == 0 {
-			progress(indexedCount)
-		}
-
+		rowsCh <- row{path, rel, name, ext, cat, size, modUnix, hashVal}
 		return nil
 	}
 
 	if err := fastwalk.Walk(&walkConf, root, walkFn); err != nil {
+		close(rowsCh)
+		<-writerDone
 		return 0, err
 	}
+	close(rowsCh)
+	<-writerDone
 
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 
-	return indexedCount, nil
+	return int(indexedCount), nil
+}
+
+// fileMeta stores the fields used to detect whether a file changed.
+type fileMeta struct {
+	size    int64
+	modUnix int64
+	hash    string
+}
+
+// loadIndexMap loads the current index keyed by absolute path for incremental
+// scanning decisions.
+func (s *Store) loadIndexMap() (map[string]fileMeta, error) {
+	rows, err := s.db.Query("SELECT path, size, mod_time, COALESCE(hash, '') FROM files")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	m := make(map[string]fileMeta)
+	for rows.Next() {
+		var p string
+		var meta fileMeta
+		if err := rows.Scan(&p, &meta.size, &meta.modUnix, &meta.hash); err == nil {
+			m[p] = meta
+		}
+	}
+	return m, rows.Err()
+}
+
+// isExcludedPath reports whether a walk entry matches an exclusion. Exclusions
+// are matched case-insensitively against the entry name and against its path
+// relative to root, with glob support via filepath.Match.
+func isExcludedPath(name, root, path string, exclusions map[string]struct{}) bool {
+	lowerName := strings.ToLower(name)
+	if _, ok := exclusions[lowerName]; ok {
+		return true
+	}
+
+	rel, err := filepath.Rel(root, path)
+	if err == nil {
+		lowerRel := strings.ToLower(filepath.ToSlash(rel))
+		if _, ok := exclusions[lowerRel]; ok {
+			return true
+		}
+		for excl := range exclusions {
+			if matched, _ := filepath.Match(excl, lowerName); matched {
+				return true
+			}
+			if matched, _ := filepath.Match(excl, lowerRel); matched {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// exclSetFromArgs flattens one or more comma-separated exclusion lists into a
+// normalized (lowercased) set of names/patterns.
+func exclSetFromArgs(exclusions ...[]string) map[string]struct{} {
+	exclSet := make(map[string]struct{})
+	for _, group := range exclusions {
+		for _, raw := range group {
+			for _, part := range strings.Split(raw, ",") {
+				if p := strings.ToLower(strings.TrimSpace(part)); p != "" {
+					exclSet[p] = struct{}{}
+				}
+			}
+		}
+	}
+	return exclSet
+}
+
+// CountFiles walks root and returns how many files IndexDirectory would index
+// (skipping hidden files, subdirectories, and excluded paths). It performs a
+// lightweight, hashing-free scan so callers can build an accurate total for a
+// progress bar before the (potentially slow) hashing pass.
+func (s *Store) CountFiles(root string, exclusions ...[]string) (int, error) {
+	root = filepath.Clean(root)
+	exclSet := exclSetFromArgs(exclusions...)
+
+	var count int64
+	conf := fastwalk.Config{Follow: false}
+	err := fastwalk.Walk(&conf, root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		name := d.Name()
+		if isExcludedPath(name, root, path, exclSet) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || strings.HasPrefix(name, ".") {
+			return nil
+		}
+		atomic.AddInt64(&count, 1)
+		return nil
+	})
+	return int(count), err
 }
 
 // GetStats returns storage breakdown across categories and largest files
@@ -389,7 +551,13 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 		}
 	}
 
-	// For candidate sizes, compute hash if missing
+	// For candidate sizes, compute hash if missing (in parallel, bounded workers).
+	var (
+		eg  errgroup.Group
+		mu  sync.Mutex
+		out []struct{ path, hash string }
+	)
+	eg.SetLimit(runtime.GOMAXPROCS(0))
 	for _, sz := range candidateSizes {
 		var unhashedPaths []string
 		unhashed, err := s.db.Query("SELECT path FROM files WHERE size = ? AND (hash IS NULL OR hash = '')", sz)
@@ -404,9 +572,47 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 		}
 
 		for _, p := range unhashedPaths {
-			if h, err := hashFile(p); err == nil {
-				_, _ = s.db.Exec("UPDATE files SET hash = ? WHERE path = ?", h, p)
+			p := p
+			eg.Go(func() error {
+				h, err := hashFile(p)
+				if err != nil {
+					return nil // skip unreadable files, matching prior behavior
+				}
+				mu.Lock()
+				out = append(out, struct{ path, hash string }{p, h})
+				mu.Unlock()
+				return nil
+			})
+		}
+	}
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Persist computed hashes in a single transaction (serial write).
+	if len(out) > 0 {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return nil, err
+		}
+		stmt, err := tx.Prepare("UPDATE files SET hash = ? WHERE path = ?")
+		if err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+		for _, r := range out {
+			if _, err := stmt.Exec(r.hash, r.path); err != nil {
+				tx.Rollback()
+				stmt.Close()
+				return nil, err
 			}
+		}
+		if err := stmt.Close(); err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
 		}
 	}
 
@@ -442,6 +648,8 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 		if err != nil {
 			continue
 		}
+		var members []IndexedFile
+		var paths []string
 		for fileRows.Next() {
 			var f IndexedFile
 			var modUnix int64
@@ -449,12 +657,44 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 			f.Hash = hgi.hash
 			if err := fileRows.Scan(&f.Path, &f.RelPath, &f.Name, &f.Extension, &modUnix, &f.Category); err == nil {
 				f.ModTime = time.Unix(modUnix, 0)
-				g.Files = append(g.Files, f)
+				members = append(members, f)
+				paths = append(paths, f.Path)
 			}
 		}
 		fileRows.Close()
 
-		groups = append(groups, g)
+		// Re-verify the grouped files actually share identical content right now.
+		// A file can keep the same size and mtime yet change content, which the
+		// incremental scan heuristic would otherwise miss. Re-hashing group
+		// members guarantees we never report a false duplicate.
+		confirmed := make([]bool, len(paths))
+		if len(paths) > 1 {
+			eg := errgroup.Group{}
+			eg.SetLimit(runtime.GOMAXPROCS(0))
+			for i, p := range paths {
+				i, p := i, p
+				eg.Go(func() error {
+					h, err := hashFile(p)
+					if err == nil && h == hgi.hash {
+						confirmed[i] = true
+					}
+					return nil
+				})
+			}
+			_ = eg.Wait()
+		}
+
+		for i, f := range members {
+			if confirmed[i] {
+				g.Files = append(g.Files, f)
+			}
+		}
+
+		// Only report groups that still have 2+ identical files.
+		if len(g.Files) >= 2 {
+			g.WastedSize = g.Size * int64(len(g.Files)-1)
+			groups = append(groups, g)
+		}
 	}
 
 	return groups, nil

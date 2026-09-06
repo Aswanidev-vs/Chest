@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	gosort "sort"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/Aswanidev-vs/chest/internal/classifier"
 	"github.com/Aswanidev-vs/chest/internal/filesystem"
 	"github.com/Aswanidev-vs/chest/internal/history"
@@ -18,6 +18,7 @@ import (
 	"github.com/Aswanidev-vs/chest/internal/presets"
 	"github.com/Aswanidev-vs/chest/internal/rules"
 	"github.com/Aswanidev-vs/chest/internal/scanner"
+	"github.com/spf13/cobra"
 )
 
 type sortFlags struct {
@@ -47,6 +48,7 @@ func newSortCmd() *cobra.Command {
 		Use:   "sort [path]",
 		Short: "Organize files in the target or current directory",
 		Long:  "Sort files according to presets, criteria flags (-t, -f, -s, -d) or custom rules.",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			targetDir := "."
 			if len(args) > 0 {
@@ -339,29 +341,58 @@ func newSortCmd() *cobra.Command {
 
 			// Interactive Confirmation
 			if !f.yes {
-				fmt.Printf("\nCHEST\n\n%d files will be moved.\n%d folders will be created.\n\nContinue? [y/N]: ",
-					len(plan.Operations), len(plan.FoldersToCreate))
+				fmt.Printf("\nCHEST PLAN\n\n%d files will be moved.\n", len(plan.Operations))
+
+				// Destination breakdown so the user can see exactly what will happen
+				destCounts := make(map[string]int)
+				for _, op := range plan.Operations {
+					relDst, _ := filepath.Rel(absTarget, op.Destination)
+					destCounts[filepath.Dir(relDst)]++
+				}
+				dests := make([]string, 0, len(destCounts))
+				for d := range destCounts {
+					dests = append(dests, d)
+				}
+				gosort.Strings(dests)
+				fmt.Println("\nDestination summary:")
+				for _, d := range dests {
+					fmt.Printf("  %-28s %d file(s)\n", d, destCounts[d])
+				}
+
+				if len(plan.FoldersToCreate) > 0 {
+					fmt.Printf("\n%d folders will be created.\n", len(plan.FoldersToCreate))
+				}
+				fmt.Print("\nContinue? [y/N]: ")
 				reader := bufio.NewReader(os.Stdin)
 				resp, _ := reader.ReadString('\n')
 				resp = strings.TrimSpace(strings.ToLower(resp))
 				if resp != "y" && resp != "yes" {
-					fmt.Println("Operation aborted.")
+					fmt.Println("Operation aborted. (Use --dry-run to preview, or -y to skip this prompt.)")
 					return nil
 				}
 			}
 
 			// Execute Plan
 			histMgr, _ := history.DefaultManager()
+			var bar *progressBar
+			if !f.verbose && !f.quiet {
+				bar = newProgressBar(len(plan.Operations))
+			}
 			progressFn := func(op models.Operation, idx, total int) {
 				if f.verbose {
 					relSrc, _ := filepath.Rel(absTarget, op.Source)
 					relDst, _ := filepath.Rel(absTarget, op.Destination)
 					fmt.Printf("[MATCH] %s -> %s (%s)\n", relSrc, relDst, op.Reason)
 					fmt.Printf("[MOVE] %s\n", filepath.Base(op.Source))
+				} else if bar != nil {
+					bar.advance(idx)
 				}
 			}
 
 			result, err := organizer.Execute(plan, histMgr, progressFn)
+			if bar != nil {
+				bar.finish()
+			}
 			if err != nil {
 				return fmt.Errorf("execution error: %w", err)
 			}

@@ -3,10 +3,10 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
-	"os"
 
 	"github.com/Aswanidev-vs/chest/internal/indexer"
 	"github.com/spf13/cobra"
@@ -44,14 +44,12 @@ func newIndexCmd() *cobra.Command {
 			fmt.Printf("\x1b[38;5;254mIndexing directory \x1b[38;5;220m%s\x1b[0m...\n", path)
 			start := time.Now()
 
-			count, err := store.IndexDirectory(path, computeHashes, func(curr int) {
-				fmt.Printf("\r  \x1b[38;5;246mIndexed %d files...\x1b[0m", curr)
-			})
+			count, err := indexWithProgress(store, path, computeHashes)
 			if err != nil {
 				return err
 			}
 
-			fmt.Printf("\r\x1b[1;38;5;82m✔ Indexed %d files\x1b[0m in %v\n", count, time.Since(start).Round(time.Millisecond))
+			fmt.Printf("\x1b[1;38;5;82m✔ Indexed %d files\x1b[0m in %v\n", count, time.Since(start).Round(time.Millisecond))
 			return nil
 		},
 	}
@@ -169,8 +167,10 @@ func newStatsCmd() *cobra.Command {
 }
 
 func newDuplicatesCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "duplicates [path]",
+	var except []string
+
+	cmd := &cobra.Command{
+		Use:   "duplicates [path] [--except dir,glob]",
 		Short: "Find duplicate files using content hashes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := indexer.OpenOrCreate()
@@ -180,7 +180,7 @@ func newDuplicatesCmd() *cobra.Command {
 			defer store.Close()
 
 			if len(args) > 0 {
-				_, _ = store.IndexDirectory(args[0], true, nil)
+				_, _ = indexWithProgress(store, args[0], true, except)
 			}
 
 			groups, err := store.FindDuplicates()
@@ -214,6 +214,10 @@ func newDuplicatesCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringSliceVar(&except, "except", nil,
+		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
+	return cmd
 }
 
 func newAnalyzeCmd() *cobra.Command {
@@ -228,7 +232,7 @@ func newAnalyzeCmd() *cobra.Command {
 			defer store.Close()
 
 			if len(args) > 0 {
-				_, _ = store.IndexDirectory(args[0], false, nil)
+				_, _ = indexWithProgress(store, args[0], false)
 			}
 
 			report, err := store.Analyze()

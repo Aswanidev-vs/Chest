@@ -1,2 +1,4 @@
 .mimocode/
 testing/
+*.exe
+/chest
