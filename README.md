@@ -230,4 +230,4 @@ https://aswanidev-vs.github.io/Chest/
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+GPLv3 License. See [LICENSE](LICENSE) for details.
