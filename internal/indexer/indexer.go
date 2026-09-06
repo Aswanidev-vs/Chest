@@ -249,18 +249,7 @@ func (s *Store) MarkHistoryUndone(id int) error {
 // matched against each entry name and its path relative to root.
 func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(current int), exclusions ...[]string) (int, error) {
 	root = filepath.Clean(root)
-
-	// Build a normalized set of exclusion names/patterns.
-	exclSet := make(map[string]struct{})
-	for _, group := range exclusions {
-		for _, raw := range group {
-			for _, part := range strings.Split(raw, ",") {
-				if p := strings.ToLower(strings.TrimSpace(part)); p != "" {
-					exclSet[p] = struct{}{}
-				}
-			}
-		}
-	}
+	exclSet := exclSetFromArgs(exclusions...)
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -379,6 +368,52 @@ func isExcludedPath(name, root, path string, exclusions map[string]struct{}) boo
 		}
 	}
 	return false
+}
+
+// exclSetFromArgs flattens one or more comma-separated exclusion lists into a
+// normalized (lowercased) set of names/patterns.
+func exclSetFromArgs(exclusions ...[]string) map[string]struct{} {
+	exclSet := make(map[string]struct{})
+	for _, group := range exclusions {
+		for _, raw := range group {
+			for _, part := range strings.Split(raw, ",") {
+				if p := strings.ToLower(strings.TrimSpace(part)); p != "" {
+					exclSet[p] = struct{}{}
+				}
+			}
+		}
+	}
+	return exclSet
+}
+
+// CountFiles walks root and returns how many files IndexDirectory would index
+// (skipping hidden files, subdirectories, and excluded paths). It performs a
+// lightweight, hashing-free scan so callers can build an accurate total for a
+// progress bar before the (potentially slow) hashing pass.
+func (s *Store) CountFiles(root string, exclusions ...[]string) (int, error) {
+	root = filepath.Clean(root)
+	exclSet := exclSetFromArgs(exclusions...)
+
+	var count int64
+	conf := fastwalk.Config{Follow: false}
+	err := fastwalk.Walk(&conf, root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		name := d.Name()
+		if isExcludedPath(name, root, path, exclSet) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || strings.HasPrefix(name, ".") {
+			return nil
+		}
+		atomic.AddInt64(&count, 1)
+		return nil
+	})
+	return int(count), err
 }
 
 // GetStats returns storage breakdown across categories and largest files

@@ -133,3 +133,50 @@ func TestIndexDirectoryExcept(t *testing.T) {
 		t.Fatalf("Expected 1 indexed file when excluding *.txt (c.go), got %d", count)
 	}
 }
+
+func TestCountFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_count.db")
+
+	store, err := OpenOrCreate(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	root := filepath.Join(tempDir, "root")
+	_ = os.MkdirAll(filepath.Join(root, "sub"), 0755)
+	_ = os.MkdirAll(filepath.Join(root, "node_modules", "pkg"), 0755)
+
+	_ = os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0644)
+	_ = os.WriteFile(filepath.Join(root, "sub", "b.txt"), []byte("b"), 0644)
+	_ = os.WriteFile(filepath.Join(root, ".hidden"), []byte("h"), 0644)
+	_ = os.WriteFile(filepath.Join(root, "node_modules", "pkg", "x.js"), []byte("x"), 0644)
+
+	// No exclusions: hidden file skipped, node_modules counted.
+	n, err := store.CountFiles(root)
+	if err != nil {
+		t.Fatalf("CountFiles failed: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("Expected 3 files (a.txt, b.txt, x.js), got %d", n)
+	}
+
+	// Excluded node_modules: pruned entirely.
+	n, err = store.CountFiles(root, []string{"node_modules"})
+	if err != nil {
+		t.Fatalf("CountFiles with exclusions failed: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("Expected 2 files with node_modules excluded, got %d", n)
+	}
+
+	// CountFiles must agree with what IndexDirectory actually indexes.
+	indexed, err := store.IndexDirectory(root, false, nil, []string{"node_modules"})
+	if err != nil {
+		t.Fatalf("IndexDirectory failed: %v", err)
+	}
+	if indexed != n {
+		t.Errorf("CountFiles (%d) disagrees with IndexDirectory (%d)", n, indexed)
+	}
+}
