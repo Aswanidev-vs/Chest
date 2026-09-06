@@ -3,10 +3,10 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
-	"os"
 
 	"github.com/Aswanidev-vs/chest/internal/indexer"
 	"github.com/spf13/cobra"
@@ -169,8 +169,10 @@ func newStatsCmd() *cobra.Command {
 }
 
 func newDuplicatesCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "duplicates [path]",
+	var except []string
+
+	cmd := &cobra.Command{
+		Use:   "duplicates [path] [--except dir,glob]",
 		Short: "Find duplicate files using content hashes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := indexer.OpenOrCreate()
@@ -180,7 +182,7 @@ func newDuplicatesCmd() *cobra.Command {
 			defer store.Close()
 
 			if len(args) > 0 {
-				_, _ = store.IndexDirectory(args[0], true, nil)
+				_, _ = store.IndexDirectory(args[0], true, nil, except)
 			}
 
 			groups, err := store.FindDuplicates()
@@ -214,6 +216,10 @@ func newDuplicatesCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringSliceVar(&except, "except", nil,
+		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
+	return cmd
 }
 
 func newAnalyzeCmd() *cobra.Command {

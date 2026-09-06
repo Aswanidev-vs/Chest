@@ -179,14 +179,19 @@ and top largest files consuming disk space.`,
 	},
 	"duplicates": {
 		Name:     "CHEST-DUPLICATES(1) - Duplicate Detection",
-		Synopsis: "chest duplicates [path]",
+		Synopsis: "chest duplicates [path] [--except dir,glob]",
 		Description: `Locates byte-identical files using cryptographic SHA256 hashes.
 Groups candidates first by exact file size, then calculates hashes to guarantee
-100% accurate duplicate detection. Read-only operation; never deletes files automatically.`,
-		Options:  []string{},
+100% accurate duplicate detection. Read-only operation; never deletes files automatically.
+Use --except to skip directories/files (e.g. node_modules, vendored deps) so large,
+noisy subtrees never get hashed during the scan.`,
+		Options: []string{
+			"--except <dir,glob>  Exclude directories/files from the scan (comma-separated, globs allowed)",
+		},
 		Examples: []string{
 			"chest duplicates                     Check for duplicates in indexed files",
 			"chest duplicates ~/Downloads         Index and find duplicates in Downloads",
+			"chest duplicates ~/Projects --except node_modules,venv,.git   Skip noise dirs",
 		},
 		SeeAlso: []string{"index", "analyze"},
 	},

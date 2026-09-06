@@ -68,3 +68,68 @@ func TestIndexerStore(t *testing.T) {
 		t.Errorf("Expected 1 duplicate group in analyze report")
 	}
 }
+
+func TestIndexDirectoryExcept(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_except.db")
+
+	store, err := OpenOrCreate(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	// Keep/Root files
+	rootDir := filepath.Join(tempDir, "root")
+	_ = os.MkdirAll(filepath.Join(rootDir, "keep_sub"), 0755)
+
+	// Files that should be indexed
+	dup1 := filepath.Join(rootDir, "dup.txt")
+	dup2 := filepath.Join(rootDir, "keep_sub", "dup.txt")
+	_ = os.WriteFile(dup1, []byte("same content abc"), 0644)
+	_ = os.WriteFile(dup2, []byte("same content abc"), 0644)
+
+	// Files that must be skipped via exclusion
+	_ = os.MkdirAll(filepath.Join(rootDir, "node_modules", "pkg"), 0755)
+	_ = os.WriteFile(filepath.Join(rootDir, "node_modules", "pkg", "index.js"), []byte("node dep x"), 0644)
+	_ = os.WriteFile(filepath.Join(rootDir, "node_modules", "lock"), []byte("node dep y"), 0644)
+	_ = os.MkdirAll(filepath.Join(rootDir, "venv"), 0755)
+	_ = os.WriteFile(filepath.Join(rootDir, "venv", "site.py"), []byte("venv lib z"), 0644)
+	_ = os.WriteFile(filepath.Join(rootDir, ".gitkeep"), []byte("hidden file"), 0644)
+
+	count, err := store.IndexDirectory(rootDir, true, nil, []string{"node_modules,venv"})
+	if err != nil {
+		t.Fatalf("Failed to index with exclusions: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("Expected 2 indexed files (excluded dirs pruned), got %d", count)
+	}
+
+	// Ensure excluded files are not in the index.
+	for _, excluded := range []string{
+		filepath.Join(rootDir, "node_modules", "pkg", "index.js"),
+		filepath.Join(rootDir, "node_modules", "lock"),
+		filepath.Join(rootDir, "venv", "site.py"),
+	} {
+		var c int
+		err := store.db.QueryRow("SELECT COUNT(*) FROM files WHERE path = ?", excluded).Scan(&c)
+		if err != nil || c != 0 {
+			t.Errorf("Expected excluded path %s to be absent, got %d (err=%v)", excluded, c, err)
+		}
+	}
+
+	// Glob-style exclusion of a file name, on a fresh root.
+	globDir := filepath.Join(tempDir, "glob_root")
+	_ = os.MkdirAll(globDir, 0755)
+	_ = os.WriteFile(filepath.Join(globDir, "a.txt"), []byte("aaa"), 0644)
+	_ = os.WriteFile(filepath.Join(globDir, "b.txt"), []byte("bbb"), 0644)
+	_ = os.WriteFile(filepath.Join(globDir, "c.go"), []byte("ccc"), 0644)
+
+	count, err = store.IndexDirectory(globDir, false, nil, []string{"*.txt"})
+	if err != nil {
+		t.Fatalf("Failed indexing with glob exclusion: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("Expected 1 indexed file when excluding *.txt (c.go), got %d", count)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Aswanidev-vs/chest/internal/classifier"
@@ -31,12 +32,12 @@ type IndexedFile struct {
 
 // StatsSummary aggregates storage statistics
 type StatsSummary struct {
-	TotalFiles       int               `json:"total_files"`
-	TotalDirectories int               `json:"total_directories"`
-	TotalSize        int64             `json:"total_size"`
-	CategoryCounts   map[string]int    `json:"category_counts"`
-	CategorySizes    map[string]int64  `json:"category_sizes"`
-	LargestFiles     []IndexedFile     `json:"largest_files"`
+	TotalFiles       int              `json:"total_files"`
+	TotalDirectories int              `json:"total_directories"`
+	TotalSize        int64            `json:"total_size"`
+	CategoryCounts   map[string]int   `json:"category_counts"`
+	CategorySizes    map[string]int64 `json:"category_sizes"`
+	LargestFiles     []IndexedFile    `json:"largest_files"`
 }
 
 // DuplicateGroup represents files sharing identical hash
@@ -54,7 +55,6 @@ type AnalyzeReport struct {
 	OldFiles        []IndexedFile    `json:"old_files"` // Files older than 180 days
 	EmptyFiles      []IndexedFile    `json:"empty_files"`
 }
-
 
 // OpenOrCreate opens or creates local sqlite index database
 func OpenOrCreate(customPath ...string) (*Store, error) {
@@ -244,9 +244,23 @@ func (s *Store) MarkHistoryUndone(id int) error {
 	return err
 }
 
-// IndexDirectory scans a target folder and updates index
-func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(current int)) (int, error) {
+// IndexDirectory scans a target folder and updates index.
+// exclusions is a list of comma-separated names/globs (dirs or files) to skip,
+// matched against each entry name and its path relative to root.
+func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(current int), exclusions ...[]string) (int, error) {
 	root = filepath.Clean(root)
+
+	// Build a normalized set of exclusion names/patterns.
+	exclSet := make(map[string]struct{})
+	for _, group := range exclusions {
+		for _, raw := range group {
+			for _, part := range strings.Split(raw, ",") {
+				if p := strings.ToLower(strings.TrimSpace(part)); p != "" {
+					exclSet[p] = struct{}{}
+				}
+			}
+		}
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -263,15 +277,28 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 	}
 	defer stmt.Close()
 
-	indexedCount := 0
+	indexedCount := int64(0)
 	walkConf := fastwalk.Config{Follow: false}
 
 	walkFn := func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
 			return nil
 		}
 
 		name := d.Name()
+
+		// Prune excluded directories entirely instead of descending into them.
+		if isExcludedPath(name, root, path, exclSet) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
 		if strings.HasPrefix(name, ".") {
 			return nil
 		}
@@ -307,9 +334,10 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 			return nil
 		}
 
-		indexedCount++
-		if progress != nil && indexedCount%50 == 0 {
-			progress(indexedCount)
+		// walkFn runs concurrently; guard the shared counter.
+		atomic.AddInt64(&indexedCount, 1)
+		if progress != nil && atomic.LoadInt64(&indexedCount)%50 == 0 {
+			progress(int(atomic.LoadInt64(&indexedCount)))
 		}
 
 		return nil
@@ -323,7 +351,34 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 		return 0, err
 	}
 
-	return indexedCount, nil
+	return int(indexedCount), nil
+}
+
+// isExcludedPath reports whether a walk entry matches an exclusion. Exclusions
+// are matched case-insensitively against the entry name and against its path
+// relative to root, with glob support via filepath.Match.
+func isExcludedPath(name, root, path string, exclusions map[string]struct{}) bool {
+	lowerName := strings.ToLower(name)
+	if _, ok := exclusions[lowerName]; ok {
+		return true
+	}
+
+	rel, err := filepath.Rel(root, path)
+	if err == nil {
+		lowerRel := strings.ToLower(filepath.ToSlash(rel))
+		if _, ok := exclusions[lowerRel]; ok {
+			return true
+		}
+		for excl := range exclusions {
+			if matched, _ := filepath.Match(excl, lowerName); matched {
+				return true
+			}
+			if matched, _ := filepath.Match(excl, lowerRel); matched {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetStats returns storage breakdown across categories and largest files
