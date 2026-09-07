@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -123,7 +124,7 @@ func newCleanCmd() *cobra.Command {
 
 func newStatsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "stats",
+		Use:   "stats [path]",
 		Short: "Display storage and category statistics from local index",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := indexer.OpenOrCreate()
@@ -132,7 +133,11 @@ func newStatsCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			summary, err := store.GetStats()
+			root := ""
+			if len(args) > 0 {
+				root = args[0]
+			}
+			summary, err := store.GetStats(root)
 			if err != nil {
 				return err
 			}
@@ -179,11 +184,20 @@ func newDuplicatesCmd() *cobra.Command {
 			}
 			defer store.Close()
 
+			root := ""
 			if len(args) > 0 {
-				_, _ = indexWithProgress(store, args[0], true, except)
+				root = args[0]
+				// Canonicalize to an absolute path so the exact string we index
+				// under is the same one FindDuplicates() scopes its query by.
+				// Mixing spellings (./x vs E:\x vs x) creates disjoint row sets,
+				// so the report can leak rows from an earlier scan of another dir.
+				if abs, err := filepath.Abs(filepath.Clean(root)); err == nil {
+					root = abs
+				}
+				_, _ = indexWithProgress(store, root, true, except)
 			}
 
-			groups, err := store.FindDuplicates()
+			groups, err := store.FindDuplicates(root)
 			if err != nil {
 				return err
 			}
@@ -231,15 +245,33 @@ func newAnalyzeCmd() *cobra.Command {
 			}
 			defer store.Close()
 
+			root := ""
 			if len(args) > 0 {
 				// Hash during the progress-covered walk (computeHashes=true) so the
 				// duplicate phase in Analyze() reads no file contents — it becomes a
 				// pure SQL GROUP BY on stored hashes. Unchanged files are still
 				// skipped incrementally and reuse their cached hash.
-				_, _ = indexWithProgress(store, args[0], true)
+				root = args[0]
+				if abs, err := filepath.Abs(filepath.Clean(root)); err == nil {
+					root = abs
+				}
+				_, _ = indexWithProgress(store, root, true)
 			}
 
-			report, err := store.Analyze()
+			// Analyze() is not instant: computing stats, scanning the duplicate
+			// groups (hashing any stale-size candidates) and detecting old/empty
+			// files all happen here. Show what's running so the screen isn't blank
+			// between the progress walk finishing and the report being printed.
+			fmt.Println()
+			if root == "" {
+				fmt.Println("  \x1b[1;38;5;214mComputing storage insights...\x1b[0m")
+			} else {
+				fmt.Printf("  \x1b[1;38;5;214mComputing storage insights for %s...\x1b[0m\n", root)
+			}
+			fmt.Println("  \x1b[38;5;110m   · aggregating categories & total size\x1b[0m")
+			fmt.Println("  \x1b[38;5;110m   · scanning for duplicate content\x1b[0m")
+			fmt.Println("  \x1b[38;5;110m   · detecting old & empty files\x1b[0m")
+			report, err := store.Analyze(root)
 			if err != nil {
 				return err
 			}
