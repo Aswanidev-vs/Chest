@@ -488,20 +488,57 @@ func (s *Store) CountFiles(root string, exclusions ...[]string) (int, error) {
 	return int(count), err
 }
 
-// GetStats returns storage breakdown across categories and largest files
-func (s *Store) GetStats() (StatsSummary, error) {
+// normalizeRoot cleans a scan root the same way IndexDirectory does, so report
+// scoping matches the stored `path` column regardless of whether the user wrote
+// `testing`, `./testing`, or `E:\Chest\testing`.
+func normalizeRoot(root string) string {
+	if root == "" {
+		return ""
+	}
+	return filepath.Clean(root)
+}
+
+// pathScope builds a `path` prefix predicate (and its params) that narrows a
+// query to a single indexed folder subtree. The trailing separator is included in
+// the matched prefix, so a sibling folder (e.g. `root2` or `root-two`) can never
+// leak into the results. Returns ("", nil) for an empty root (whole-index query).
+func pathScope(root string) (string, []any) {
+	root = normalizeRoot(root)
+	if root == "" {
+		return "", nil
+	}
+	sep := string(filepath.Separator)
+	pref := root + sep
+	// Match the folder in question alone plus everything directly under it.
+	return "(path = ? OR (substr(path, 1, ?) = ? AND length(path) > ?))",
+		[]any{root, len(pref), pref, len(pref)}
+}
+
+// GetStats returns storage breakdown across categories and largest files.
+// When `root` is non-empty, results are scoped to that indexed folder subtree only.
+func (s *Store) GetStats(root string) (StatsSummary, error) {
+	scope, scopeArgs := pathScope(root)
 	var summary StatsSummary
 	summary.CategoryCounts = make(map[string]int)
 	summary.CategorySizes = make(map[string]int64)
 
 	// Total count & size
-	row := s.db.QueryRow("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files")
+	countSQL := "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM files"
+	if scope != "" {
+		countSQL += " WHERE " + scope
+	}
+	row := s.db.QueryRow(countSQL, scopeArgs...)
 	if err := row.Scan(&summary.TotalFiles, &summary.TotalSize); err != nil {
 		return summary, err
 	}
 
 	// Category aggregates
-	rows, err := s.db.Query("SELECT category, COUNT(*), SUM(size) FROM files GROUP BY category")
+	catSQL := "SELECT category, COUNT(*), SUM(size) FROM files"
+	if scope != "" {
+		catSQL += " WHERE " + scope
+	}
+	catSQL += " GROUP BY category"
+	rows, err := s.db.Query(catSQL, scopeArgs...)
 	if err != nil {
 		return summary, err
 	}
@@ -518,7 +555,12 @@ func (s *Store) GetStats() (StatsSummary, error) {
 	}
 
 	// Top 10 largest files
-	topRows, err := s.db.Query("SELECT path, rel_path, name, extension, size, mod_time, category FROM files ORDER BY size DESC LIMIT 10")
+	topSQL := "SELECT path, rel_path, name, extension, size, mod_time, category FROM files"
+	if scope != "" {
+		topSQL += " WHERE " + scope
+	}
+	topSQL += " ORDER BY size DESC LIMIT 10"
+	topRows, err := s.db.Query(topSQL, scopeArgs...)
 	if err == nil {
 		defer topRows.Close()
 		for topRows.Next() {
@@ -534,10 +576,18 @@ func (s *Store) GetStats() (StatsSummary, error) {
 	return summary, nil
 }
 
-// FindDuplicates identifies identical files based on size and hash
-func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
+// FindDuplicates identifies identical files based on size and hash.
+// When `root` is non-empty, only that indexed folder subtree is considered.
+func (s *Store) FindDuplicates(root string) ([]DuplicateGroup, error) {
+	scope, scopeArgs := pathScope(root)
+
 	// First compute hashes for files with matching sizes that don't have hashes yet
-	sizeRows, err := s.db.Query("SELECT size FROM files WHERE size > 0 GROUP BY size HAVING COUNT(*) > 1")
+	sizeSQL := "SELECT size FROM files WHERE size > 0"
+	if scope != "" {
+		sizeSQL += " AND " + scope
+	}
+	sizeSQL += " GROUP BY size HAVING COUNT(*) > 1"
+	sizeRows, err := s.db.Query(sizeSQL, scopeArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -564,7 +614,11 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 	eg.SetLimit(runtime.GOMAXPROCS(0))
 	for _, sz := range candidateSizes {
 		var unhashedPaths []string
-		unhashed, err := s.db.Query("SELECT path FROM files WHERE size = ? AND (hash IS NULL OR hash = '')", sz)
+		unhashedSQL := "SELECT path FROM files WHERE size = ? AND (hash IS NULL OR hash = '')"
+		if scope != "" {
+			unhashedSQL += " AND " + scope
+		}
+		unhashed, err := s.db.Query(unhashedSQL, append([]any{sz}, scopeArgs...)...)
 		if err == nil {
 			for unhashed.Next() {
 				var p string
@@ -629,7 +683,12 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 	}
 	var hashInfos []hashGroupInfo
 
-	hashRows, err := s.db.Query("SELECT hash, COUNT(*), size FROM files WHERE hash != '' GROUP BY hash HAVING COUNT(*) > 1")
+	hashSQL := "SELECT hash, COUNT(*), size FROM files WHERE hash != ''"
+	if scope != "" {
+		hashSQL += " AND " + scope
+	}
+	hashSQL += " GROUP BY hash HAVING COUNT(*) > 1"
+	hashRows, err := s.db.Query(hashSQL, scopeArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -649,7 +708,11 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 			WastedSize: hgi.size * int64(hgi.count-1),
 		}
 
-		fileRows, err := s.db.Query("SELECT path, rel_path, name, extension, mod_time, category FROM files WHERE hash = ?", hgi.hash)
+		fileSQL := "SELECT path, rel_path, name, extension, mod_time, category FROM files WHERE hash = ?"
+		if scope != "" {
+			fileSQL += " AND " + scope
+		}
+		fileRows, err := s.db.Query(fileSQL, append([]any{hgi.hash}, scopeArgs...)...)
 		if err != nil {
 			continue
 		}
@@ -713,14 +776,17 @@ func (s *Store) FindDuplicates() ([]DuplicateGroup, error) {
 	return groups, nil
 }
 
-// Analyze generates complete intelligence report
-func (s *Store) Analyze() (AnalyzeReport, error) {
-	stats, err := s.GetStats()
+// Analyze generates complete intelligence report.
+// When `root` is non-empty, the report is scoped to that indexed folder subtree.
+func (s *Store) Analyze(root string) (AnalyzeReport, error) {
+	scope, scopeArgs := pathScope(root)
+
+	stats, err := s.GetStats(root)
 	if err != nil {
 		return AnalyzeReport{}, err
 	}
 
-	dups, _ := s.FindDuplicates()
+	dups, _ := s.FindDuplicates(root)
 
 	var report AnalyzeReport
 	report.Stats = stats
@@ -728,7 +794,12 @@ func (s *Store) Analyze() (AnalyzeReport, error) {
 
 	// Old files (> 180 days ago)
 	sixMonthsAgo := time.Now().AddDate(0, -6, 0).Unix()
-	oldRows, err := s.db.Query("SELECT path, rel_path, name, extension, size, mod_time, category FROM files WHERE mod_time < ? ORDER BY mod_time ASC LIMIT 20", sixMonthsAgo)
+	oldSQL := "SELECT path, rel_path, name, extension, size, mod_time, category FROM files WHERE mod_time < ?"
+	if scope != "" {
+		oldSQL += " AND " + scope
+	}
+	oldSQL += " ORDER BY mod_time ASC LIMIT 20"
+	oldRows, err := s.db.Query(oldSQL, append([]any{sixMonthsAgo}, scopeArgs...)...)
 	if err == nil {
 		defer oldRows.Close()
 		for oldRows.Next() {
@@ -742,7 +813,12 @@ func (s *Store) Analyze() (AnalyzeReport, error) {
 	}
 
 	// Empty files
-	emptyRows, err := s.db.Query("SELECT path, rel_path, name, extension, size, mod_time, category FROM files WHERE size = 0 LIMIT 20")
+	emptySQL := "SELECT path, rel_path, name, extension, size, mod_time, category FROM files WHERE size = 0"
+	if scope != "" {
+		emptySQL += " AND " + scope
+	}
+	emptySQL += " LIMIT 20"
+	emptyRows, err := s.db.Query(emptySQL, scopeArgs...)
 	if err == nil {
 		defer emptyRows.Close()
 		for emptyRows.Next() {

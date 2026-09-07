@@ -59,18 +59,18 @@ func TestIndexerStore(t *testing.T) {
 	assert.Equal(t, 3, count, "Expected 3 indexed files")
 
 	// Test Stats
-	stats, err := store.GetStats()
+	stats, err := store.GetStats("")
 	require.NoError(t, err, "Failed to get stats")
 	assert.Equal(t, 3, stats.TotalFiles, "Expected 3 total files in stats")
 
 	// Test Duplicates
-	dups, err := store.FindDuplicates()
+	dups, err := store.FindDuplicates(filesDir)
 	require.NoError(t, err, "Failed finding duplicates")
 	require.Len(t, dups, 1, "Expected 1 duplicate group")
 	assert.Len(t, dups[0].Files, 2, "Expected 2 files in duplicate group")
 
 	// Test Analyze
-	report, err := store.Analyze()
+	report, err := store.Analyze(filesDir)
 	require.NoError(t, err, "Failed to analyze")
 	assert.Len(t, report.DuplicateGroups, 1, "Expected 1 duplicate group in analyze report")
 }
@@ -221,7 +221,7 @@ func TestIndexIncremental(t *testing.T) {
 	}
 
 	// The persisted hash must still make duplicates detectable.
-	if _, err := store.FindDuplicates(); err != nil {
+	if _, err := store.FindDuplicates(root); err != nil {
 		t.Fatalf("FindDuplicates failed: %v", err)
 	}
 
@@ -260,7 +260,7 @@ func TestDuplicateHashReverify(t *testing.T) {
 	if _, err := store.IndexDirectory(root, true, nil); err != nil {
 		t.Fatalf("index failed: %v", err)
 	}
-	dups, err := store.FindDuplicates()
+	dups, err := store.FindDuplicates(root)
 	if err != nil {
 		t.Fatalf("FindDuplicates failed: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestDuplicateHashReverify(t *testing.T) {
 	}
 
 	// Even though size+mtime match, re-verification must drop the changed file.
-	dups, err = store.FindDuplicates()
+	dups, err = store.FindDuplicates(root)
 	if err != nil {
 		t.Fatalf("FindDuplicates after change failed: %v", err)
 	}
@@ -307,13 +307,13 @@ func TestFindDuplicatesComputesMissingHashes(t *testing.T) {
 	assert.Equal(t, 2, idx)
 
 	// FindDuplicates computes + persists the missing hashes and still finds dup.
-	dups, err := store.FindDuplicates()
+	dups, err := store.FindDuplicates(root)
 	require.NoError(t, err)
 	require.Len(t, dups, 1, "expected 1 duplicate group from computed hashes")
 	assert.Len(t, dups[0].Files, 2)
 
 	// Second call: hashes are persisted, nothing left to hash, same result.
-	dups2, err := store.FindDuplicates()
+	dups2, err := store.FindDuplicates(root)
 	require.NoError(t, err)
 	require.Len(t, dups2, 1, "expected same duplicate group on repeat call")
 
@@ -322,7 +322,7 @@ func TestFindDuplicatesComputesMissingHashes(t *testing.T) {
 	require.NoError(t, os.WriteFile(c, []byte("different-size-content!"), 0644))
 	_, err = store.IndexDirectory(root, false, nil)
 	require.NoError(t, err)
-	dups3, err := store.FindDuplicates()
+	dups3, err := store.FindDuplicates(root)
 	require.NoError(t, err)
 	require.Len(t, dups3, 1, "still only the original 2-file group")
 }
