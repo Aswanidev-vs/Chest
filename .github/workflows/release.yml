@@ -1,0 +1,107 @@
+name: Release
+
+# Build release binaries for Windows, Linux and macOS and attach them to a
+# GitHub Release when a tag matching `v*` (e.g. v0.3.0) is pushed.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build chest-${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+          - os: windows
+            arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+          BIN="chest${ext}"
+          mkdir -p "stage/chest-${GOOS}-${GOARCH}"
+          # -trimpath removes local paths, -ldflags strips symbols and pins the
+          # released version into `chest version`.
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X github.com/Aswanidev-vs/chest/internal/cli.Version=${VERSION}" \
+            -o "stage/chest-${GOOS}-${GOARCH}/${BIN}" \
+            ./cmd/chest
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          os="${{ matrix.os }}"
+          arch="${{ matrix.arch }}"
+          tag="${{ github.ref_name }}"
+          dir="stage/chest-${os}-${arch}"
+          cp LICENSE "${dir}/LICENSE"
+          cp README.md "${dir}/README.md"
+          if [ "$os" = "windows" ]; then
+            (cd stage && zip -r "chest-${os}-${arch}-${tag}.zip" "chest-${os}-${arch}/")
+          else
+            tar -C "stage/chest-${os}-${arch}" -czf "stage/chest-${os}-${arch}-${tag}.tar.gz" .
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chest-${{ matrix.os }}-${{ matrix.arch }}
+          path: stage/chest-${{ matrix.os }}-${{ matrix.arch }}-${{ github.ref_name }}.*
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release/
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: release
+        run: sha256sum * > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "CHEST $GITHUB_REF_NAME"
