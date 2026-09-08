@@ -239,6 +239,10 @@ func newAnalyzeCmd() *cobra.Command {
 		Use:   "analyze [path]",
 		Short: "Analyze indexed filesystem data and report storage intelligence",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Time the whole run (including any indexing walk) so report
+			// generation shows how long the command took end-to-end.
+			start := time.Now()
+
 			store, err := indexer.OpenOrCreate()
 			if err != nil {
 				return err
@@ -295,6 +299,8 @@ func newAnalyzeCmd() *cobra.Command {
 			}
 
 			fmt.Println()
+			fmt.Printf("  \x1b[38;5;246mCompleted in:\x1b[0m      %v\n", time.Since(start).Round(time.Millisecond))
+			fmt.Println("\x1b[1;38;5;82m✔ Analysis complete.\x1b[0m")
 			return nil
 		},
 	}

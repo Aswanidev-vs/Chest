@@ -14,6 +14,7 @@ import (
 	"github.com/Aswanidev-vs/chest/internal/planner"
 	"github.com/Aswanidev-vs/chest/internal/presets"
 	"github.com/Aswanidev-vs/chest/internal/rules"
+	"github.com/Aswanidev-vs/chest/internal/scanner"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -23,16 +24,40 @@ type WatchOptions struct {
 	Preset    string
 	Rules     []string
 	Debounce  time.Duration
+	Initial   bool
 	DryRun    bool
+}
+
+// EventKind identifies the type of activity reported to the watch output.
+type EventKind int
+
+const (
+	KindOrganized EventKind = 0 // a file was organized into a compartment
+	KindCreated   EventKind = 1 // a new user folder appeared
+	KindDeleted   EventKind = 2 // a user folder was deleted or renamed away
+	KindError     EventKind = 3 // watcher or processing error
+)
+
+// Event is a single piece of activity reported by [Watcher.Start].
+type Event struct {
+	Kind EventKind // what happened
+	Name string    // file or folder name involved
+	Dest string    // for KindOrganized: the destination; otherwise empty
+	Err  error     // set when Kind is KindError
 }
 
 // Watcher monitors a folder and sorts incoming files
 type Watcher struct {
-	opts    WatchOptions
-	rules   []models.Rule
-	engine  *rules.Engine
-	planner *planner.Planner
-	history *history.Manager
+	opts      WatchOptions
+	rules     []models.Rule
+	engine    *rules.Engine
+	planner   *planner.Planner
+	history   *history.Manager
+	// managed holds the compartment folder names chest itself creates for rules.
+	managed map[string]struct{}
+	// knownDirs holds external top-level folders seen so far (key: lowercased
+	// path), so user folder creation and deletion can be reported accurately.
+	knownDirs map[string]struct{}
 }
 
 // New creates a Watcher
@@ -71,17 +96,28 @@ func New(opts WatchOptions) (*Watcher, error) {
 	p := planner.New(engine, "", models.CollisionRename)
 	histMgr, _ := history.DefaultManager()
 
+	// Collect the compartment folder names chest manages, so in watch mode we
+	// don't report chest's own created folders as user-created ones.
+	managed := make(map[string]struct{})
+	for _, r := range activeRules {
+		if r.Destination != "" {
+			managed[localName(r.Destination)] = struct{}{}
+		}
+	}
+
 	return &Watcher{
-		opts:    opts,
-		rules:   activeRules,
-		engine:  engine,
-		planner: p,
-		history: histMgr,
+		opts:      opts,
+		rules:     activeRules,
+		engine:    engine,
+		planner:   p,
+		history:   histMgr,
+		managed:   managed,
+		knownDirs: make(map[string]struct{}),
 	}, nil
 }
 
 // Start begins watching the target folder
-func (w *Watcher) Start(ctx context.Context, onEvent func(file string, dest string, err error)) error {
+func (w *Watcher) Start(ctx context.Context, cb func(ev Event)) error {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
@@ -93,10 +129,31 @@ func (w *Watcher) Start(ctx context.Context, onEvent func(file string, dest stri
 		return err
 	}
 
+	// Track the external folders that already exist so we can report when the
+	// user creates a new one and stop reporting ones once they're deleted.
+	w.seedKnownDirs(targetDir)
+
 	var (
 		mu      sync.Mutex
 		pending = make(map[string]*time.Timer)
 	)
+
+	// Optional initial sweep: organize files already present in the folder
+	// before entering watch mode. This makes `watch --initial` behave like a
+	// one-time sort followed by continuous monitoring of new arrivals.
+	if w.opts.Initial {
+		sc := scanner.New(scanner.ScanOptions{
+			Recursive:      false, // fsnotify only monitors the top-level directory
+			IncludeHidden:  false,
+			FollowSymlinks: false,
+		})
+		existing, serr := sc.Scan(targetDir)
+		if serr == nil {
+			for _, ex := range existing {
+				w.processFile(ex.Path, cb)
+			}
+		}
+	}
 
 	for {
 		select {
@@ -107,44 +164,64 @@ func (w *Watcher) Start(ctx context.Context, onEvent func(file string, dest stri
 			if !ok {
 				return nil
 			}
+			path := event.Name
 
-			// Only process write or create
-			if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) {
-				path := event.Name
-
-				// Ignore temp/download files (.tmp, .crdownload, .part)
-				ext := strings.ToLower(filepath.Ext(path))
-				if ext == ".tmp" || ext == ".crdownload" || ext == ".part" {
+			// Report top-level folder changes (create/delete/rename).
+			//
+			// On Windows a folder creation arrives as a Create event; a deletion
+			// as a Remove; a rename as a Remove of the old name plus a Create of
+			// the new one (fsnotify's Rename/Create correlation is not part of the
+			// public API, so the old name is reported as removed here).
+			if event.Has(fsnotify.Create) {
+				if st, serr := os.Stat(path); serr == nil && st.IsDir() {
+					w.handleDirCreated(path, cb)
 					continue
 				}
-
-				mu.Lock()
-				if timer, exists := pending[path]; exists {
-					timer.Stop()
-				}
-
-				pending[path] = time.AfterFunc(w.opts.Debounce, func() {
-					mu.Lock()
-					delete(pending, path)
-					mu.Unlock()
-
-					w.processFile(path, onEvent)
-				})
-				mu.Unlock()
 			}
+			if event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
+				if _, known := w.knownDirs[strings.ToLower(path)]; known {
+					w.handleDirRemoved(path, cb)
+				}
+				continue // (file) removals and renames are not reported
+			}
+
+			// Only organize new or modified files.
+			if !(event.Has(fsnotify.Create) || event.Has(fsnotify.Write)) {
+				continue
+			}
+
+			// Ignore temp/download files (.tmp, .crdownload, .part)
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext == ".tmp" || ext == ".crdownload" || ext == ".part" {
+				continue
+			}
+
+			mu.Lock()
+			if timer, exists := pending[path]; exists {
+				timer.Stop()
+			}
+
+			pending[path] = time.AfterFunc(w.opts.Debounce, func() {
+				mu.Lock()
+				delete(pending, path)
+				mu.Unlock()
+
+				w.processFile(path, cb)
+			})
+			mu.Unlock()
 
 		case err, ok := <-fsw.Errors:
 			if !ok {
 				return nil
 			}
-			if onEvent != nil {
-				onEvent("", "", err)
+			if cb != nil {
+				cb(Event{Kind: KindError, Err: err})
 			}
 		}
 	}
 }
 
-func (w *Watcher) processFile(filePath string, onEvent func(file string, dest string, err error)) {
+func (w *Watcher) processFile(filePath string, cb func(ev Event)) {
 	info, err := os.Stat(filePath)
 	if err != nil || info.IsDir() {
 		return
@@ -178,7 +255,70 @@ func (w *Watcher) processFile(filePath string, onEvent func(file string, dest st
 		_, execErr = organizer.Execute(plan, w.history, nil)
 	}
 
-	if onEvent != nil {
-		onEvent(name, plan.Operations[0].Destination, execErr)
+	if cb != nil {
+		cb(Event{Kind: KindOrganized, Name: name, Dest: plan.Operations[0].Destination, Err: execErr})
 	}
+}
+
+// seedKnownDirs records the external (non-managed) folders already present so
+// that creation and deletion of user folders can be reported accurately.
+func (w *Watcher) seedKnownDirs(root string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		info, ierr := entry.Info()
+		if ierr != nil {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		if !info.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		if _, managed := w.managed[localName(path)]; managed {
+			continue
+		}
+		w.knownDirs[strings.ToLower(path)] = struct{}{}
+	}
+}
+
+// handleDirCreated records a new top-level folder and reports it, unless it's
+// one of chest's own compartment folders (or a dot-directory).
+func (w *Watcher) handleDirCreated(path string, cb func(ev Event)) {
+	if strings.HasPrefix(baseName(path), ".") {
+		return
+	}
+	if _, managed := w.managed[localName(path)]; managed {
+		return
+	}
+	lower := strings.ToLower(path)
+	if _, known := w.knownDirs[lower]; known {
+		return
+	}
+	w.knownDirs[lower] = struct{}{}
+	if cb != nil {
+		cb(Event{Kind: KindCreated, Name: baseName(path)})
+	}
+}
+
+// handleDirRemoved stops tracking a folder that was deleted or renamed away and
+// reports it.
+func (w *Watcher) handleDirRemoved(path string, cb func(ev Event)) {
+	delete(w.knownDirs, strings.ToLower(path))
+	if cb != nil {
+		cb(Event{Kind: KindDeleted, Name: baseName(path)})
+	}
+}
+
+// baseName returns the final component of a path, preserving original case.
+func baseName(p string) string {
+	parts := strings.Split(filepath.ToSlash(p), "/")
+	return strings.TrimSpace(parts[len(parts)-1])
+}
+
+// localName returns the lower-cased final component of a path, used for matching
+// paths against managed destination folders.
+func localName(p string) string {
+	return strings.ToLower(baseName(p))
 }

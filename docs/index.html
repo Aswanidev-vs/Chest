@@ -117,6 +117,9 @@
           <button class="term-cmd-chip" data-cmd="undo" type="button">
             <i data-lucide="rotate-ccw"></i> chest undo
           </button>
+          <button class="term-cmd-chip" data-cmd="completion" type="button">
+            <i data-lucide="terminal"></i> chest completion
+          </button>
         </div>
 
         <pre class="terminal-content" id="term-demo-body"><span class="term-ln"><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-cmd">sort</span> <span class="t-path">~/Downloads</span> <span class="t-flag">-p</span> downloads <span class="t-flag">--dry-run</span></span><span class="term-ln"></span><span class="term-ln"><span class="t-key">CHEST PLAN</span>  <span class="t-dim"># 3 moves, 0 collisions detected</span></span><span class="term-ln">  <span class="t-cmd">anime_ep01.mkv</span>      <span class="t-arrow">→</span>  <span class="t-path">Downloads/Videos/</span></span><span class="term-ln">  <span class="t-cmd">profile_shot.png</span>    <span class="t-arrow">→</span>  <span class="t-path">Downloads/Images/</span></span><span class="term-ln">  <span class="t-cmd">q3_financials.pdf</span>   <span class="t-arrow">→</span>  <span class="t-path">Downloads/Documents/</span></span><span class="term-ln"></span><span class="term-ln"><span class="t-warn">3 files prepared to move. No changes made (dry run).</span></span><span class="term-ln"><span class="t-dim">Run with -y or omit --dry-run to apply.</span></span></pre>
@@ -163,7 +166,7 @@
           </div>
           <h3 class="feature-card-title">Continuous FS Watcher</h3>
           <p class="feature-card-desc">
-            Watches folders via <code>fsnotify</code>. Configured with a 500ms debounce guard to prevent half-finished downloads from being organized prematurely.
+            Watches folders via <code>fsnotify</code> with a 500ms debounce guard. Add <code>--initial</code> to sort what's already there before watching, and get instant feedback when folders are created or removed.
           </p>
         </div>
 
@@ -239,9 +242,9 @@
             <span class="cmd-tag">chest search</span>
             <i data-lucide="search" style="color: var(--text-dim);"></i>
           </div>
-          <p class="cmd-desc">Fuzzy scores filenames and greps inside file content with extension and size filters.</p>
+          <p class="cmd-desc">Fuzzy filename scoring with in-file grep (line numbers + snippets). Combine category, extension, size, and date filters — or emit JSON for scripts.</p>
           <div class="cmd-snippet">
-            <span>chest search "invoice" -e pdf</span>
+            <span>chest search "invoice" -e pdf -c "total"</span>
             <i data-lucide="chevron-right"></i>
           </div>
         </div>
@@ -290,6 +293,18 @@
           <p class="cmd-desc">Generates storage allocation breakdowns, largest file rankings, and stale item diagnostics.</p>
           <div class="cmd-snippet">
             <span>chest stats ~/Desktop</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
+            <span class="cmd-tag">chest completion</span>
+            <i data-lucide="terminal" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc">Installs shell tab-completion for <code>bash</code>, <code>zsh</code>, and <code>fish</code> in one command — auto-detects your shell and wires it into your profile.</p>
+          <div class="cmd-snippet">
+            <span>chest completion --install</span>
             <i data-lucide="chevron-right"></i>
           </div>
         </div>

@@ -38,7 +38,7 @@ and local SQLite metadata indexing.`,
 			"chest stats                          Display storage distribution analytics",
 			"chest man sort                       Show full manual page for sort command",
 		},
-		SeeAlso: []string{"sort", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "plugin", "clean"},
+		SeeAlso: []string{"sort", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean"},
 	},
 	"sort": {
 		Name:     "CHEST-SORT(1) - File Organization",
@@ -144,7 +144,7 @@ Use 'chest undo cache' to view cache info or '--clear' to wipe all history.`,
 		Synopsis: "chest history",
 		Description: `Displays chronological log of previous organization operations, including
 timestamp, target directory, count of moved files, and current status (Complete / Undone).`,
-		Options:  []string{},
+		Options: []string{},
 		Examples: []string{
 			"chest history                        View table of previous organization runs",
 		},
@@ -242,6 +242,38 @@ Use -y/--yes flag to bypass the prompt in scripts or automation.`,
 			"chest clean --all -y                 Remove database file without asking",
 		},
 		SeeAlso: []string{"index", "undo"},
+	},
+	"completion": {
+		Name:     "CHEST-COMPLETION(1) - Shell Tab Completion",
+		Synopsis: "chest completion [shell] [--install] [--output <file>]",
+		Description: `Give your shell tab-completion for chest, so you can type "chest s" and press
+Tab to complete to sort, or "chest sort --p" and let it complete --preset - the
+same autocomplete you get with git or docker.
+
+The recommended setup is a one-liner:
+    chest completion --install
+which detects your shell, writes the script to the standard location for that
+shell, and adds the load line to your shell profile, so completion loads in every
+new terminal session. If detection can't tell (for example on Windows), pass the
+shell explicitly:
+    chest completion zsh --install
+
+Without --install the script for the chosen shell is printed to stdout so you can
+inspect it or save it wherever you like. The script is what the shell runs to
+complete chest; it is only needed once, and regenerating it is harmless.`,
+		Options: []string{
+			"-s, --shell <name>    Shell to generate for: bash, zsh, fish (auto-detected when using --install)",
+			"-i, --install         Detect your shell (or use the shell argument) and install completion permanently",
+			"-o, --output <file>   Write the completion script to this file instead of stdout",
+		},
+		Examples: []string{
+			"chest completion --install             Detect your shell, install, and wire it up (recommended)",
+			"chest completion zsh --install         Install zsh completion permanently",
+			"chest completion fish --install        Install fish completion permanently",
+			"chest completion bash > _chest         Save the bash completion script to a file",
+			"chest completion zsh -o _chest         Write the zsh script to a custom path",
+		},
+		SeeAlso: []string{"watch", "man"},
 	},
 }
 
