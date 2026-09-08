@@ -19,6 +19,7 @@ func newWatchCmd() *cobra.Command {
 		rulesList   []string
 		debounce    time.Duration
 		dryRun      bool
+		initial     bool
 		allowSystem bool
 	)
 
@@ -26,9 +27,11 @@ func newWatchCmd() *cobra.Command {
 		Use:   "watch [directory]",
 		Short: "Continuously monitor and automatically organize incoming files",
 		Long: `Watch a folder in real-time. When new files are downloaded or copied,
-CHEST automatically applies preset or custom rules and organizes them into compartments.`,
+CHEST automatically applies preset or custom rules and organizes them into compartments.
+Use --initial to also sort files already present before starting to watch.`,
 		Example: `  chest watch ~/Downloads
   chest watch ~/Downloads --preset media
+  chest watch ~/Desktop --initial
   chest watch ~/Desktop --rule "*.png -> Screenshots"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "."
@@ -46,6 +49,7 @@ CHEST automatically applies preset or custom rules and organizes them into compa
 				Rules:     rulesList,
 				Debounce:  debounce,
 				DryRun:    dryRun,
+				Initial:   initial,
 			})
 			if err != nil {
 				return err
@@ -67,16 +71,30 @@ CHEST automatically applies preset or custom rules and organizes them into compa
 			if presetName != "" {
 				fmt.Printf("   Preset: \x1b[38;5;75m%s\x1b[0m\n", presetName)
 			}
+			if initial {
+				fmt.Println("   Sorting existing files first (--initial)...")
+			}
 			fmt.Println("   Press Ctrl+C to stop.")
 
-			return w.Start(ctx, func(file, dest string, err error) {
-				if err != nil {
-					fmt.Printf("   \x1b[38;5;196m✖ Error organizing %s: %v\x1b[0m\n", file, err)
-					return
+			// Flush so the banner appears even when stdout is piped or redirected
+			// to a log file (block-buffered) before the watcher blocks below.
+			_ = os.Stdout.Sync()
+
+			return w.Start(ctx, func(ev watcher.Event) {
+				if ev.Kind == watcher.KindOrganized {
+					if ev.Err != nil {
+						fmt.Printf("   \x1b[38;5;196m✖ Error organizing %s: %v\x1b[0m\n", ev.Name, ev.Err)
+					} else if ev.Name != "" {
+						fmt.Printf("   \x1b[38;5;82m⚡ Organized:\x1b[0m %s \x1b[38;5;246m→\x1b[0m \x1b[38;5;220m%s\x1b[0m\n", ev.Name, ev.Dest)
+					}
+				} else if ev.Kind == watcher.KindCreated {
+					fmt.Printf("   \x1b[38;5;75m📁 Folder created:\x1b[0m %s\n", ev.Name)
+				} else if ev.Kind == watcher.KindDeleted {
+					fmt.Printf("   \x1b[38;5;196m🗑 Folder removed:\x1b[0m %s\n", ev.Name)
+				} else if ev.Kind == watcher.KindError && ev.Err != nil {
+					fmt.Printf("   \x1b[38;5;196m✖ %v\x1b[0m\n", ev.Err)
 				}
-				if file != "" {
-					fmt.Printf("   \x1b[38;5;82m⚡ Organized:\x1b[0m %s \x1b[38;5;246m→\x1b[0m \x1b[38;5;220m%s\x1b[0m\n", file, dest)
-				}
+				_ = os.Stdout.Sync()
 			})
 		},
 	}
@@ -85,6 +103,7 @@ CHEST automatically applies preset or custom rules and organizes them into compa
 	cmd.Flags().StringArrayVarP(&rulesList, "rule", "r", nil, "Custom rule string")
 	cmd.Flags().DurationVarP(&debounce, "debounce", "d", 500*time.Millisecond, "Settle duration before moving file")
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Preview what watch would organize")
+	cmd.Flags().BoolVarP(&initial, "initial", "i", false, "Sort existing files first, then watch for new ones")
 	cmd.Flags().BoolVar(&allowSystem, "allow-system", false, "Allow monitoring and moving files in protected system directories")
 
 	return cmd
