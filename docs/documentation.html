@@ -248,7 +248,15 @@
           </table>
 
           <h3 id="cmd-search">chest search</h3>
-          <p>Ultra-fast file search across directory trees with optional content grep.</p>
+          <p>Ultra-fast filesystem search using <code>fastwalk</code> for parallel multi-core directory traversal and the <code>fzf</code> algorithm for scoring. Patterns match fuzzily by default (switch to exact substring with <code>-x</code> or regular expressions with <code>-r</code>), and filters can be freely combined: file category, extension, size, modification date, and streaming content grep that reports line numbers and snippets. Results are color-coded by category, or emitted as JSON for scripting.</p>
+          <div class="code-block-wrapper">
+            <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">search</span> <span class="t-path">"movie"</span>             <span class="t-comment"># Fuzzy filename search (default mode)</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">search</span> <span class="t-flag">--type</span> video <span class="t-flag">--size</span> <span class="t-path">"&gt;1GB"</span>  <span class="t-comment"># Combine category + size filters</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">search</span> <span class="t-flag">-e</span> pdf,docx <span class="t-flag">-m</span> <span class="t-path">"&lt;30d"</span> <span class="t-path">~/Documents</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">search</span> <span class="t-flag">-c</span> <span class="t-path">"TODO"</span> internal/   <span class="t-comment"># Grep inside files, with line numbers</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">search</span> <span class="t-flag">-e</span> go,md <span class="t-flag">-i</span> chest <span class="t-flag">-j</span>  <span class="t-comment"># JSON output for scripting</span></code></pre>
+          </div>
 
           <table class="flag-table">
             <thead>
@@ -260,9 +268,14 @@
             </thead>
             <tbody>
               <tr>
-                <td><span class="flag-badge">-c, --content</span></td>
+                <td><span class="flag-badge">[pattern] [path]</span></td>
+                <td>arguments</td>
+                <td>Filename/path pattern to match, and the root directory to traverse (default <code>.</code>).</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-t, --type</span></td>
                 <td>string</td>
-                <td>Grep inside file contents for matching string; returns line number and snippet.</td>
+                <td>Filter by category: <code>image</code>, <code>video</code>, <code>document</code>, <code>audio</code>, <code>code</code>, <code>archive</code>, etc. Plugin-registered categories are included too.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">-e, --ext</span></td>
@@ -272,7 +285,42 @@
               <tr>
                 <td><span class="flag-badge">-s, --size</span></td>
                 <td>string</td>
-                <td>Size condition: <code>>100MB</code>, <code><10KB</code>.</td>
+                <td>Size condition: <code>&gt;100MB</code>, <code>&lt;10KB</code>, <code>&gt;=1GB</code>, <code>=5MB</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-m, --modified</span></td>
+                <td>string</td>
+                <td>Modification time condition: <code>&gt;30d</code> (newer than), <code>&lt;7d</code> (older than), or a calendar date like <code>2026-01-01</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-c, --content</span></td>
+                <td>string</td>
+                <td>Grep inside file contents for matching string; returns line number and snippet.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-i, --ignore-case</span></td>
+                <td>boolean</td>
+                <td>Case-insensitive matching. Enabled by default.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-r, --regex</span></td>
+                <td>boolean</td>
+                <td>Treat the pattern as a regular expression instead of fuzzy text.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-x, --exact</span></td>
+                <td>boolean</td>
+                <td>Exact substring matching instead of fuzzy ranking.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-H, --hidden</span></td>
+                <td>boolean</td>
+                <td>Include hidden files and folders in the traversal.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-l, --limit</span></td>
+                <td>int</td>
+                <td>Stop after returning n matches.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">-j, --json</span></td>
