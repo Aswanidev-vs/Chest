@@ -65,6 +65,7 @@
             <li><a class="docs-nav-link" href="#cmd-index">chest index & clean</a></li>
             <li><a class="docs-nav-link" href="#cmd-intel">stats, dupes & analyze</a></li>
             <li><a class="docs-nav-link" href="#cmd-man">man, preset & version</a></li>
+          <li><a class="docs-nav-link" href="#cmd-completion">chest completion</a></li>
           </ul>
         </div>
 
@@ -282,10 +283,11 @@
           </table>
 
           <h3 id="cmd-watch">chest watch</h3>
-          <p>Background daemon monitoring real-time filesystem changes using <code>fsnotify</code>.</p>
+          <p>Background daemon monitoring real-time filesystem changes using <code>fsnotify</code>. New files are sorted as they arrive, folder creations and removals are reported instantly, and <code>--initial</code> sorts files that are already present before watching begins.</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
-            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">watch</span> <span class="t-path">~/Downloads</span> <span class="t-flag">--preset</span> media <span class="t-flag">--debounce</span> 500ms</code></pre>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">watch</span> <span class="t-path">~/Downloads</span> <span class="t-flag">--preset</span> media <span class="t-flag">--debounce</span> 500ms
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">watch</span> <span class="t-path">~/Desktop</span> <span class="t-flag">--initial</span>  <span class="t-comment"># Sort existing files first, then watch</span></code></pre>
           </div>
 
           <table class="flag-table">
@@ -306,6 +308,11 @@
                 <td><span class="flag-badge">--debounce</span></td>
                 <td>duration</td>
                 <td>Wait interval before sorting a newly created file. Default <code>500ms</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-i, --initial</span></td>
+                <td>boolean</td>
+                <td>Sort files already present in the folder first, then keep watching for new ones.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--allow-system</span></td>
@@ -357,7 +364,7 @@
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-path">~/Projects</span>            <span class="t-comment"># Category and size breakdown</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Downloads</span>      <span class="t-comment"># Locate byte-for-byte duplicates</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Projects</span> <span class="t-flag">--except</span> node_modules,venv <span class="t-comment"># Skip noisy dirs</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">analyze</span> <span class="t-path">~/Documents</span>         <span class="t-comment"># Find zero-byte files and stale items (&gt;180 days)</span></code></pre>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">analyze</span> <span class="t-path">~/Documents</span>         <span class="t-comment"># Find zero-byte files and stale items (&gt;180 days); footer shows total run time</span></code></pre>
           </div>
 
           <h3 id="cmd-man">man, preset & version</h3>
@@ -367,6 +374,48 @@
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">preset</span>         <span class="t-comment"># List all built-in rulesets</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">version</span>        <span class="t-comment"># Print binary version, commit, and platform</span></code></pre>
           </div>
+
+          <h3 id="cmd-completion">chest completion</h3>
+          <p>Installs shell tab-completion so your shell autocompletes chest subcommands and flags — type <code>chest s</code> and press <kbd>Tab</kbd> to complete to <code>sort</code>. The recommended setup is a single command; it detects your shell from <code>$SHELL</code>, writes the script to the standard location for that shell, and wires it into your shell's startup file so completion loads in every new terminal.</p>
+          <div class="code-block-wrapper">
+            <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">completion</span> <span class="t-flag">--install</span>      <span class="t-comment"># Detect your shell, install, and wire it up (recommended)</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">completion</span> zsh <span class="t-flag">--install</span>   <span class="t-comment"># Install zsh completion permanently</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">completion</span> fish <span class="t-flag">--install</span>  <span class="t-comment"># Install fish completion permanently</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">completion</span> bash &gt; _chest <span class="t-comment"># Print the raw script to stdout instead</span></code></pre>
+          </div>
+
+          <table class="flag-table">
+            <thead>
+              <tr>
+                <th>Flag</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="flag-badge">[shell]</span></td>
+                <td>argument</td>
+                <td>Target shell: <code>bash</code>, <code>zsh</code>, or <code>fish</code>. Optional with <code>--install</code> (auto-detected from <code>$SHELL</code>).</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-i, --install</span></td>
+                <td>boolean</td>
+                <td>Detect your shell (or use the shell argument) and install completion permanently, wiring it into your shell profile.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-o, --output &lt;file&gt;</span></td>
+                <td>string</td>
+                <td>Write the completion script to this file instead of stdout.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-s, --shell &lt;name&gt;</span></td>
+                <td>string</td>
+                <td>Shell to generate for: <code>bash</code>, <code>zsh</code>, <code>fish</code>.</td>
+              </tr>
+            </tbody>
+          </table>
 
           <!-- Section: Plugins -->
           <h2 id="plugin-guide"><i data-lucide="puzzle"></i> Plugin Architecture & Guide</h2>

@@ -32,12 +32,23 @@
     },
     watch: {
       title: 'bash — ~/Downloads (chest watch daemon)',
-      html: '<span class="term-ln"><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-cmd">watch</span> <span class="t-path">~/Downloads</span> <span class="t-flag">--preset</span> media <span class="t-flag">--debounce</span> 500ms</span>' +
+      html: '<span class="term-ln"><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-cmd">watch</span> <span class="t-path">~/Downloads</span> <span class="t-flag">--preset</span> media <span class="t-flag">--initial</span></span>' +
             '<span class="term-ln"></span>' +
             '<span class="term-ln"><span class="t-ok">● Active watcher</span> on <span class="t-path">~/Downloads</span></span>' +
-            '<span class="term-ln"><span class="t-dim">Debounce guard: 500ms (prevents classifying partial downloads)</span></span>' +
-            '<span class="term-ln">  <span class="t-ok">⚡ Event:</span> new file <span class="t-cmd">recording_2026.mp4</span></span>' +
-            '<span class="term-ln">  <span class="t-arrow">✓ Moved</span> <span class="t-cmd">recording_2026.mp4</span> <span class="t-arrow">→</span> <span class="t-path">~/Downloads/Videos/</span></span>'
+            '<span class="term-ln"><span class="t-dim">Sorting existing files first (--initial)...</span></span>' +
+            '<span class="term-ln">  <span class="t-ok">📁 Folder created:</span> <span class="t-cmd">Screenshots</span></span>' +
+            '<span class="term-ln">  <span class="t-ok">⚡ Organized:</span> <span class="t-cmd">recording_2026.mp4</span> <span class="t-arrow">→</span> <span class="t-path">~/Downloads/Videos/</span></span>' +
+            '<span class="term-ln">  <span class="t-warn">🗑 Folder removed:</span> <span class="t-cmd">old-takes</span></span>'
+    },
+    completion: {
+      title: 'bash — one-time shell setup (chest completion)',
+      html: '<span class="term-ln"><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-cmd">completion</span> <span class="t-flag">--install</span></span>' +
+            '<span class="term-ln"></span>' +
+            '<span class="term-ln"><span class="t-ok">  Added to ~/.bashrc</span></span>' +
+            '<span class="term-ln"><span class="t-ok">  Installed bash completion -> ~/.local/share/bash-completion/completions/chest</span></span>' +
+            '<span class="term-ln"><span class="t-dim">  Restart your shell, then type `chest ` and press Tab to try it.</span></span>' +
+            '<span class="term-ln"></span>' +
+            '<span class="term-ln"><span class="t-prompt">$</span> <span class="t-cmd">chest</span> so<span class="t-key">▮</span>   <span class="t-dim"># Tab → chest sort</span></span>'
     },
     duplicates: {
       title: 'bash — ~/Projects (chest duplicates)',

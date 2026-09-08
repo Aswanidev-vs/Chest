@@ -46,13 +46,14 @@ make build
   - Interactive confirmations.
   - Built-in collision policies: `skip`, `rename`, `replace`, or `abort`.
   - Comprehensive operation logging and rollbacks via `chest undo`.
-- **Folder Watch Automation**: Monitor directories continuously with `chest watch`. New files are picked up via filesystem events (`fsnotify`) and sorted automatically with debounce safeguards.
+- **Folder Watch Automation**: Monitor directories continuously with `chest watch`. New files are picked up via filesystem events (`fsnotify`) and sorted automatically with debounce safeguards. Use `--initial` to sort what's already in the folder before watching, and get instant terminal feedback when folders are created or removed.
 - **Local Indexing & Analysis**:
   - Incremental metadata and SHA256 hashing backed by pure-Go SQLite (`ncruces/go-sqlite3`).
   - Storage analytics with `chest stats`.
   - Exact duplicate file detection with `chest duplicates`.
-  - Stale and zero-byte file reports with `chest analyze`.
+  - Stale and zero-byte file reports with `chest analyze`, with a total run-time footer showing how long the command took to generate the report.
   - Cache management with `chest index --clear` and `chest clean`.
+- **Shell Tab Completion**: One-liner setup with `chest completion --install` (auto-detects your shell from `$SHELL`). Tab-complete subcommands and flags in `bash`, `zsh`, and `fish`, or print/save the raw script with `chest completion <shell>`.
 - **Parallel Performance & Live Feedback**:
   - Incremental indexing skips unchanged files (using `size + mtime`) so repeated runs are near-instant.
   - Hashing and directory traversal run in parallel across CPU cores (`errgroup` + `fastwalk`), and SQLite writes are batched in transactions.
@@ -73,18 +74,19 @@ make build
 |---|---|---|
 | `chest sort` | Sort files using presets, flags, or custom rules (`--allow-system` for OS dirs) | `chest sort ~/Downloads -t -p downloads` |
 | `chest search` | Search files by name, metadata, or file content grep | `chest search "report" -e pdf -c "invoice"` |
-| `chest watch` | Continuously watch and organize incoming files (`--allow-system` guard) | `chest watch ~/Downloads --preset media` |
+| `chest watch` | Continuously watch and organize incoming files (`--initial` sorts existing files first; `--allow-system` guard) | `chest watch ~/Downloads --preset media --initial` |
 | `chest history` | View previous operations log | `chest history` |
 | `chest undo` | Revert latest operation or specific ID, auto-cleaning empty created directories | `chest undo` or `chest undo 3` |
 | `chest undo cache` | Inspect undo cache or wipe all history (`--clear`) | `chest undo cache --clear` |
 | `chest index` | Index directory metadata into local SQLite (incremental, parallel) | `chest index ~/Documents --hash` |
 | `chest stats` | Display storage consumption and category breakdown | `chest stats` |
 | `chest duplicates` | Locate duplicate files using content hashes (`--except` to skip dirs/globs) | `chest duplicates ~/Downloads --except node_modules,venv` |
-| `chest analyze` | Read-only audit of storage distribution and old files | `chest analyze ~/Downloads` |
+| `chest analyze` | Read-only audit of storage distribution and old files, with total run time in the report footer | `chest analyze ~/Downloads` |
 | `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |
 | `chest clean` | Clear cached SQLite index with confirmation (`-y` to skip, `--all` for DB) | `chest clean -y` |
 | `chest man` | Display detailed manual page with examples (like Linux man) | `chest man sort` |
 | `chest preset` | List available built-in sorting presets | `chest preset` |
+| `chest completion` | Install shell tab-completion for `bash`, `zsh`, `fish` (`--install` auto-detects `$SHELL`) | `chest completion --install` |
 | `chest version` | Display version and build architecture | `chest version` |
 
 ---
