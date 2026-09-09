@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Aswanidev-vs/chest/internal/history"
 	"github.com/Aswanidev-vs/chest/internal/indexer"
 	"github.com/spf13/cobra"
 )
@@ -62,8 +63,9 @@ func newIndexCmd() *cobra.Command {
 
 func newCleanCmd() *cobra.Command {
 	var (
-		purgeAll bool
-		yes      bool
+		purgeAll     bool
+		clearHistory bool
+		yes          bool
 	)
 
 	cmd := &cobra.Command{
@@ -78,7 +80,11 @@ func newCleanCmd() *cobra.Command {
 			if purgeAll {
 				// Confirmation prompt
 				if !yes {
-					fmt.Print("\x1b[1;38;5;214m⚠ This will permanently delete ~/.chest/index.db.\x1b[0m\n\nContinue? [y/N]: ")
+					what := "This will permanently delete ~/.chest/index.db"
+					if clearHistory {
+						what += " and ~/.chest/history.json"
+					}
+					fmt.Printf("\x1b[1;38;5;214m⚠ %s.\x1b[0m\n\nContinue? [y/N]: ", what)
 					reader := bufio.NewReader(os.Stdin)
 					resp, _ := reader.ReadString('\n')
 					resp = strings.TrimSpace(strings.ToLower(resp))
@@ -91,33 +97,44 @@ func newCleanCmd() *cobra.Command {
 					return fmt.Errorf("failed removing db: %w", err)
 				}
 				fmt.Println("\x1b[1;38;5;82m✔ Completely removed ~/.chest/index.db database file.\x1b[0m")
-				return nil
-			}
-
-			// Confirmation prompt for index clear
-			if !yes {
-				fmt.Print("\x1b[1;38;5;214m⚠ This will clear the cached file index.\x1b[0m\n\nContinue? [y/N]: ")
-				reader := bufio.NewReader(os.Stdin)
-				resp, _ := reader.ReadString('\n')
-				resp = strings.TrimSpace(strings.ToLower(resp))
-				if resp != "y" && resp != "yes" {
-					fmt.Println("Operation aborted.")
-					return nil
+			} else {
+				// Confirmation prompt for index clear
+				if !yes {
+					what := "This will clear the cached file index"
+					if clearHistory {
+						what += " and ~/.chest/history.json"
+					}
+					fmt.Printf("\x1b[1;38;5;214m⚠ %s.\x1b[0m\n\nContinue? [y/N]: ", what)
+					reader := bufio.NewReader(os.Stdin)
+					resp, _ := reader.ReadString('\n')
+					resp = strings.TrimSpace(strings.ToLower(resp))
+					if resp != "y" && resp != "yes" {
+						fmt.Println("Operation aborted.")
+						return nil
+					}
 				}
-			}
 
-			if err := store.ClearIndex(); err != nil {
-				_ = store.Close()
-				return err
+				if err := store.ClearIndex(); err != nil {
+					_ = store.Close()
+					return err
+				}
+				fmt.Println("\x1b[1;38;5;82m✔ Cleaned index cache in SQLite. (Use --all to delete entire database file)\x1b[0m")
 			}
 			_ = store.Close()
 
-			fmt.Println("\x1b[1;38;5;82m✔ Cleaned index cache in SQLite. (Use --all to delete entire database file)\x1b[0m")
+			if clearHistory {
+				if mgr, err := history.DefaultManager(); err == nil {
+					_ = mgr.ClearHistory()
+				}
+				fmt.Println("\x1b[1;38;5;82m✔ Cleared undo history (~/.chest/history.json).\x1b[0m")
+			}
+
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&purgeAll, "all", false, "Completely delete the ~/.chest/index.db database file")
+	cmd.Flags().BoolVar(&clearHistory, "history", false, "Also delete the undo history file (~/.chest/history.json)")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
 	return cmd
 }

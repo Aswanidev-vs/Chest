@@ -83,7 +83,7 @@ make build
 | `chest duplicates` | Locate duplicate files using content hashes (`--except` to skip dirs/globs) | `chest duplicates ~/Downloads --except node_modules,venv` |
 | `chest analyze` | Read-only audit of storage distribution and old files, with total run time in the report footer | `chest analyze ~/Downloads` |
 | `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |
-| `chest clean` | Clear cached SQLite index with confirmation (`-y` to skip, `--all` for DB) | `chest clean -y` |
+| `chest clean` | Clear cached SQLite index with confirmation (`-y` to skip, `--all` for DB, `--history` to also wipe undo history) | `chest clean -y` |
 | `chest man` | Display detailed manual page with examples (like Linux man) | `chest man sort` |
 | `chest preset` | List available built-in sorting presets | `chest preset` |
 | `chest completion` | Install shell tab-completion for `bash`, `zsh`, `fish` (`--install` auto-detects `$SHELL`) | `chest completion --install` |
