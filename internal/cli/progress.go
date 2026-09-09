@@ -92,3 +92,14 @@ func indexWithProgress(store *indexer.Store, path string, computeHashes bool, ex
 		bar.advance(curr)
 	}, exclusions...)
 }
+
+// analyzeWithProgress runs store.AnalyzeProgress against a 0-100% progress bar,
+// mirroring the in-place rendering used by the indexing walk. Piped/scripted
+// output stays clean because the bar is a no-op when stdout isn't a terminal.
+func analyzeWithProgress(store *indexer.Store, root string) (indexer.AnalyzeReport, error) {
+	bar := newProgressBar(100)
+	defer bar.finish()
+	return store.AnalyzeProgress(root, func(pct int) {
+		bar.advance(pct)
+	})
+}

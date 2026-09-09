@@ -272,10 +272,7 @@ func newAnalyzeCmd() *cobra.Command {
 			} else {
 				fmt.Printf("  \x1b[1;38;5;214mComputing storage insights for %s...\x1b[0m\n", root)
 			}
-			fmt.Println("  \x1b[38;5;110m   · aggregating categories & total size\x1b[0m")
-			fmt.Println("  \x1b[38;5;110m   · scanning for duplicate content\x1b[0m")
-			fmt.Println("  \x1b[38;5;110m   · detecting old & empty files\x1b[0m")
-			report, err := store.Analyze(root)
+			report, err := analyzeWithProgress(store, root)
 			if err != nil {
 				return err
 			}
