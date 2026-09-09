@@ -517,7 +517,23 @@ func pathScope(root string) (string, []any) {
 // GetStats returns storage breakdown across categories and largest files.
 // When `root` is non-empty, results are scoped to that indexed folder subtree only.
 func (s *Store) GetStats(root string) (StatsSummary, error) {
+	return s.GetStatsProgress(root, 0, 0, nil)
+}
+
+// GetStatsProgress is GetStats with a 0-100 progress callback. As it moves from
+// pctStart toward pctEnd, `progress` is invoked with an increasing percentage once
+// each aggregate query completes.
+func (s *Store) GetStatsProgress(root string, pctStart, pctEnd int, progress func(pct int)) (StatsSummary, error) {
 	scope, scopeArgs := pathScope(root)
+	emit := func(pct int) {
+		if progress != nil {
+			progress(pct)
+		}
+	}
+	span := pctEnd - pctStart
+	lerp := func(frac int) int {
+		return pctStart + (span * frac / 1000)
+	}
 	var summary StatsSummary
 	summary.CategoryCounts = make(map[string]int)
 	summary.CategorySizes = make(map[string]int64)
@@ -531,6 +547,7 @@ func (s *Store) GetStats(root string) (StatsSummary, error) {
 	if err := row.Scan(&summary.TotalFiles, &summary.TotalSize); err != nil {
 		return summary, err
 	}
+	emit(lerp(300))
 
 	// Category aggregates
 	catSQL := "SELECT category, COUNT(*), SUM(size) FROM files"
@@ -553,6 +570,7 @@ func (s *Store) GetStats(root string) (StatsSummary, error) {
 			summary.CategorySizes[cat] = size
 		}
 	}
+	emit(lerp(700))
 
 	// Top 10 largest files
 	topSQL := "SELECT path, rel_path, name, extension, size, mod_time, category FROM files"
@@ -573,13 +591,32 @@ func (s *Store) GetStats(root string) (StatsSummary, error) {
 		}
 	}
 
+	emit(lerp(1000))
+
 	return summary, nil
 }
 
 // FindDuplicates identifies identical files based on size and hash.
 // When `root` is non-empty, only that indexed folder subtree is considered.
 func (s *Store) FindDuplicates(root string) ([]DuplicateGroup, error) {
+	return s.FindDuplicatesProgress(root, 0, 0, nil)
+}
+
+// FindDuplicatesProgress is FindDuplicates with a 0-100 progress callback so the
+// CLI can render a live bar while hashes are computed and groups re-verified.
+// Progress is reported linearly within [pctStart, pctEnd]; hashing consumes the
+// first 70% of the budget and group re-verification fills the remainder.
+func (s *Store) FindDuplicatesProgress(root string, pctStart, pctEnd int, progress func(pct int)) ([]DuplicateGroup, error) {
 	scope, scopeArgs := pathScope(root)
+	emit := func(pct int) {
+		if progress != nil {
+			progress(pct)
+		}
+	}
+	span := pctEnd - pctStart
+	lerp := func(frac int) int {
+		return pctStart + (span * frac / 1000)
+	}
 
 	// First compute hashes for files with matching sizes that don't have hashes yet
 	sizeSQL := "SELECT size FROM files WHERE size > 0"
@@ -602,18 +639,21 @@ func (s *Store) FindDuplicates(root string) ([]DuplicateGroup, error) {
 	}
 
 	// For candidate sizes, compute hash if missing (in parallel, bounded workers).
+	// Collect every unhashed path up front so we can report an accurate fraction
+	// of the hashing workload as each file completes.
 	var (
-		eg  errgroup.Group
-		mu  sync.Mutex
-		out []struct{ path, hash string }
+		eg     errgroup.Group
+		mu     sync.Mutex
+		out    []struct{ path, hash string }
+		toHash int
+		done   int
 	)
 	// fresh records the paths hashed in THIS call. Their hashes are guaranteed
 	// accurate (we just read the files), so the re-verify phase can skip them
 	// instead of reading the same contents a second time.
 	fresh := make(map[string]bool)
-	eg.SetLimit(runtime.GOMAXPROCS(0))
+	var unhash []string
 	for _, sz := range candidateSizes {
-		var unhashedPaths []string
 		unhashedSQL := "SELECT path FROM files WHERE size = ? AND (hash IS NULL OR hash = '')"
 		if scope != "" {
 			unhashedSQL += " AND " + scope
@@ -623,29 +663,37 @@ func (s *Store) FindDuplicates(root string) ([]DuplicateGroup, error) {
 			for unhashed.Next() {
 				var p string
 				if err := unhashed.Scan(&p); err == nil {
-					unhashedPaths = append(unhashedPaths, p)
+					unhash = append(unhash, p)
+					toHash++
 				}
 			}
 			unhashed.Close()
 		}
-
-		for _, p := range unhashedPaths {
-			p := p
-			eg.Go(func() error {
-				h, err := hashFile(p)
-				if err != nil {
-					return nil // skip unreadable files, matching prior behavior
-				}
-				mu.Lock()
-				out = append(out, struct{ path, hash string }{p, h})
-				fresh[p] = true
-				mu.Unlock()
-				return nil
-			})
-		}
+	}
+	eg.SetLimit(runtime.GOMAXPROCS(0))
+	for _, p := range unhash {
+		p := p
+		eg.Go(func() error {
+			h, err := hashFile(p)
+			if err != nil {
+				return nil // skip unreadable files, matching prior behavior
+			}
+			mu.Lock()
+			out = append(out, struct{ path, hash string }{p, h})
+			fresh[p] = true
+			done++
+			if toHash > 0 {
+				emit(lerp(int(int64(done) * 700 / int64(toHash))))
+			}
+			mu.Unlock()
+			return nil
+		})
 	}
 	if err := eg.Wait(); err != nil {
 		return nil, err
+	}
+	if toHash > 0 {
+		emit(lerp(700))
 	}
 
 	// Persist computed hashes in a single transaction (serial write).
@@ -701,7 +749,7 @@ func (s *Store) FindDuplicates(root string) ([]DuplicateGroup, error) {
 	hashRows.Close()
 
 	var groups []DuplicateGroup
-	for _, hgi := range hashInfos {
+	for gi, hgi := range hashInfos {
 		g := DuplicateGroup{
 			Hash:       hgi.hash,
 			Size:       hgi.size,
@@ -771,7 +819,12 @@ func (s *Store) FindDuplicates(root string) ([]DuplicateGroup, error) {
 			g.WastedSize = g.Size * int64(len(g.Files)-1)
 			groups = append(groups, g)
 		}
+		n := len(hashInfos)
+		if n > 0 {
+			emit(lerp(int(700 + int64(300) * int64(gi+1) / int64(n))))
+		}
 	}
+	emit(lerp(1000))
 
 	return groups, nil
 }
@@ -779,14 +832,28 @@ func (s *Store) FindDuplicates(root string) ([]DuplicateGroup, error) {
 // Analyze generates complete intelligence report.
 // When `root` is non-empty, the report is scoped to that indexed folder subtree.
 func (s *Store) Analyze(root string) (AnalyzeReport, error) {
-	scope, scopeArgs := pathScope(root)
+	return s.AnalyzeProgress(root, nil)
+}
 
-	stats, err := s.GetStats(root)
+// AnalyzeProgress is Analyze with a 0-100 progress callback. The CLI uses it to
+// render a live bar across the stats, duplicate and old/empty phases instead of
+// static "computing…" text.
+func (s *Store) AnalyzeProgress(root string, progress func(pct int)) (AnalyzeReport, error) {
+	scope, scopeArgs := pathScope(root)
+	emit := func(pct int) {
+		if progress != nil {
+			progress(pct)
+		}
+	}
+
+	emit(5)
+	stats, err := s.GetStatsProgress(root, 5, 30, progress)
 	if err != nil {
 		return AnalyzeReport{}, err
 	}
 
-	dups, _ := s.FindDuplicates(root)
+	emit(40)
+	dups, _ := s.FindDuplicatesProgress(root, 40, 90, progress)
 
 	var report AnalyzeReport
 	report.Stats = stats
@@ -794,6 +861,7 @@ func (s *Store) Analyze(root string) (AnalyzeReport, error) {
 
 	// Old files (> 180 days ago)
 	sixMonthsAgo := time.Now().AddDate(0, -6, 0).Unix()
+	emit(95)
 	oldSQL := "SELECT path, rel_path, name, extension, size, mod_time, category FROM files WHERE mod_time < ?"
 	if scope != "" {
 		oldSQL += " AND " + scope
@@ -813,6 +881,7 @@ func (s *Store) Analyze(root string) (AnalyzeReport, error) {
 	}
 
 	// Empty files
+	emit(98)
 	emptySQL := "SELECT path, rel_path, name, extension, size, mod_time, category FROM files WHERE size = 0"
 	if scope != "" {
 		emptySQL += " AND " + scope
@@ -830,6 +899,8 @@ func (s *Store) Analyze(root string) (AnalyzeReport, error) {
 			}
 		}
 	}
+
+	emit(100)
 
 	return report, nil
 }

@@ -230,16 +230,20 @@ without touching the core binary.`,
 		Synopsis: "chest clean [flags]",
 		Description: `Empties cached index records from SQLite files table or deletes the database
 file completely from disk. Requires interactive y/N confirmation before executing.
-Use -y/--yes flag to bypass the prompt in scripts or automation.`,
+Use -y/--yes flag to bypass the prompt in scripts or automation.
+Use --history to also delete the undo history file (~/.chest/history.json).`,
 		Options: []string{
 			"--all                Completely delete ~/.chest/index.db file",
+			"--history            Also delete ~/.chest/history.json undo history",
 			"-y, --yes            Skip confirmation prompt",
 		},
 		Examples: []string{
 			"chest clean                          Empty cached file records (with confirmation)",
 			"chest clean -y                       Empty cached records without asking",
+			"chest clean --history                Clear index records and undo history",
 			"chest clean --all                    Remove ~/.chest/index.db database file",
 			"chest clean --all -y                 Remove database file without asking",
+			"chest clean --history --all -y       Remove index database and undo history without asking",
 		},
 		SeeAlso: []string{"index", "undo"},
 	},
