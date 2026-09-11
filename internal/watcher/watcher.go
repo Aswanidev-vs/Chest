@@ -23,6 +23,7 @@ type WatchOptions struct {
 	Directory string
 	Preset    string
 	Rules     []string
+	Name      string
 	Debounce  time.Duration
 	Initial   bool
 	DryRun    bool
@@ -48,11 +49,11 @@ type Event struct {
 
 // Watcher monitors a folder and sorts incoming files
 type Watcher struct {
-	opts      WatchOptions
-	rules     []models.Rule
-	engine    *rules.Engine
-	planner   *planner.Planner
-	history   *history.Manager
+	opts    WatchOptions
+	rules   []models.Rule
+	engine  *rules.Engine
+	planner *planner.Planner
+	history *history.Manager
 	// managed holds the compartment folder names chest itself creates for rules.
 	managed map[string]struct{}
 	// knownDirs holds external top-level folders seen so far (key: lowercased
@@ -93,15 +94,29 @@ func New(opts WatchOptions) (*Watcher, error) {
 	}
 
 	engine := rules.NewEngine(activeRules)
-	p := planner.New(engine, "", models.CollisionRename)
+	// --name routes every incoming match flat into a single folder inside the
+	// watched directory (e.g. --name "Anime" -> Anime/*.mp4), ignoring category
+	// subfolders. Without it, matches go into their category compartments.
+	var p *planner.Planner
+	if opts.Name != "" {
+		baseDest := filepath.Join(opts.Directory, opts.Name)
+		p = planner.NewFlat(engine, baseDest, models.CollisionRename)
+	} else {
+		p = planner.New(engine, "", models.CollisionRename)
+	}
 	histMgr, _ := history.DefaultManager()
 
 	// Collect the compartment folder names chest manages, so in watch mode we
 	// don't report chest's own created folders as user-created ones.
 	managed := make(map[string]struct{})
-	for _, r := range activeRules {
-		if r.Destination != "" {
-			managed[localName(r.Destination)] = struct{}{}
+	if opts.Name != "" {
+		// With --name chest creates a single named folder for every match.
+		managed[localName(opts.Name)] = struct{}{}
+	} else {
+		for _, r := range activeRules {
+			if r.Destination != "" {
+				managed[localName(r.Destination)] = struct{}{}
+			}
 		}
 	}
 

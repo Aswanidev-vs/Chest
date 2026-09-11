@@ -13,6 +13,7 @@ type manTopic struct {
 	Description string
 	Options     []string
 	Examples    []string
+	Concepts    []string
 	SeeAlso     []string
 }
 
@@ -48,12 +49,13 @@ Evaluates built-in presets or user-defined custom rules with priority ranking.
 Supports dry-run preview and automatic creation of destination folders.`,
 		Options: []string{
 			"-t, --type           Sort files into category folders (Images, Videos, Documents...)",
-			"-f, --format         Sort files into folders by extension (png, pdf, mp4...)",
+			"-f, --format         Boolean flag (no value). Group files into folders by their real extension, e.g. MP4/, MP3/, PNG/ (uses each file's actual extension)",
 			"-s, --size           Sort files by size thresholds (Tiny, Small, Medium, Large, Huge)",
 			"-d, --date           Sort files by modification year/month (YYYY/MM)",
 			"-p, --preset <name>  Apply built-in preset (downloads, media, developer, documents, photos)",
 			"-r, --rule <spec>    Custom rule on the fly (e.g. 'type=video && size>1GB -> Videos/Large')",
 			"-i, --into <dir>     Base destination directory to move organized files into",
+			"--name <name>        Move ALL matching files flat into one folder in the target dir (e.g. --name \"Anime\" -> Anime/*.mp4); cannot be combined with --into",
 			"-n, --dry-run        Simulate organization without moving any files",
 			"-y, --yes            Skip interactive confirmation prompt",
 			"-c, --collision      Collision policy: skip (default), rename, replace, abort",
@@ -65,7 +67,17 @@ Supports dry-run preview and automatic creation of destination folders.`,
 			"chest sort ~/Downloads -t -p media   Sort downloads using media preset into categories",
 			"chest sort --dry-run                 Preview what files would be moved without changing anything",
 			"chest sort --rule \"*.mkv -> Movies\" Move all MKV files to Movies folder",
+			"chest sort --format                          Group by real extension -> MP4/, MP3/, PNG/ folders",
+			"chest sort --format --into \"out\"            Group by extension AND put all those folders inside ./out/",
 			"chest sort -t --into \"Organized\"   Put all categorized folders inside ./Organized/",
+			"chest sort -t --name \"Anime\"            Move all matched files flat into one folder named Anime",
+			"chest sort --rule \"*.mp4 -> Anime\"    \"->\" = move into that folder; here only *.mp4 files go into Anime",
+		},
+		Concepts: []string{
+			"CATEGORY MODES  -t/--type, -f/--format, -s/--size and -d/--date split a batch into MULTIPLE category folders (Images/, MP4/, Large Files/, 2025/).",
+			"FLAT MODES      --name <x> or --rule \"<matcher> -> <x>\" put matches into ONE folder. --name takes every matched file; --rule lets you choose WHICH files.",
+			"WRAPPING        --into <dir> places any mode's folders inside <dir>, e.g. --format --into out -> out/MP4/f.mp4.",
+			"RULE ARROW      In --rule, \"->\" means \"move into this folder\": the left side is what to match, the right side is the destination folder.",
 		},
 		SeeAlso: []string{"preset", "undo", "history", "watch"},
 	},
@@ -107,12 +119,14 @@ into compartments according to chosen presets or rules.`,
 			"-r, --rule <spec>    Custom rule expression to apply",
 			"-d, --debounce <dur> Settle duration before moving file (default: 500ms)",
 			"-n, --dry-run        Print actions without actually moving files",
+			"--name <name>        Move ALL incoming matching files flat into one folder in the watched dir (e.g. --name \"Anime\" -> Anime/*.mp4)",
 			"--allow-system       Allow monitoring and moving in protected system directories",
 		},
 		Examples: []string{
 			"chest watch ~/Downloads             Continuously organize downloads as files arrive",
 			"chest watch ~/Downloads -p media    Watch and sort downloads using media preset",
 			"chest watch ~/Desktop --rule \"*.png -> Screenshots\" Auto-move screenshot files",
+			"chest watch ~/Downloads --name \"Anime\"   Watch and dump every incoming file flat into a folder named Anime",
 		},
 		SeeAlso: []string{"sort", "preset"},
 	},
@@ -385,6 +399,14 @@ func printManPage(t manTopic) {
 				fmt.Println()
 			}
 		}
+	}
+
+	if len(t.Concepts) > 0 {
+		fmt.Printf("%sCONCEPTS%s\n", bold, reset)
+		for _, c := range t.Concepts {
+			fmt.Printf("    %s\n", c)
+		}
+		fmt.Println()
 	}
 
 	if len(t.SeeAlso) > 0 {

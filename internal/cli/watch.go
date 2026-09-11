@@ -17,6 +17,7 @@ func newWatchCmd() *cobra.Command {
 	var (
 		presetName  string
 		rulesList   []string
+		name        string
 		debounce    time.Duration
 		dryRun      bool
 		initial     bool
@@ -47,6 +48,7 @@ Use --initial to also sort files already present before starting to watch.`,
 				Directory: dir,
 				Preset:    presetName,
 				Rules:     rulesList,
+				Name:      name,
 				Debounce:  debounce,
 				DryRun:    dryRun,
 				Initial:   initial,
@@ -101,6 +103,7 @@ Use --initial to also sort files already present before starting to watch.`,
 
 	cmd.Flags().StringVarP(&presetName, "preset", "p", "downloads", "Preset to apply")
 	cmd.Flags().StringArrayVarP(&rulesList, "rule", "r", nil, "Custom rule string")
+	cmd.Flags().StringVar(&name, "name", "", "Move all incoming matched files flat into this folder inside the watched directory (e.g. --name \"Anime\" -> Anime/*.mp4)")
 	cmd.Flags().DurationVarP(&debounce, "debounce", "d", 500*time.Millisecond, "Settle duration before moving file")
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "Preview what watch would organize")
 	cmd.Flags().BoolVarP(&initial, "initial", "i", false, "Sort existing files first, then watch for new ones")

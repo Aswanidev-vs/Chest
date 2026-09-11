@@ -16,6 +16,10 @@ type Planner struct {
 	engine          *rules.Engine
 	baseDestination string
 	collisionPolicy models.CollisionPolicy
+	// flatDestination, when set, routes every matched file directly into
+	// baseDestination (ignoring the rule's category subfolder). Used by --name
+	// so users get a single named folder instead of named/category/.
+	flatDestination bool
 }
 
 // New creates a new Planner
@@ -28,6 +32,14 @@ func New(engine *rules.Engine, baseDestination string, collisionPolicy models.Co
 		baseDestination: baseDestination,
 		collisionPolicy: collisionPolicy,
 	}
+}
+
+// NewFlat creates a Planner that routes all matches directly into
+// baseDestination, without appending each rule's category folder.
+func NewFlat(engine *rules.Engine, baseDestination string, collisionPolicy models.CollisionPolicy) *Planner {
+	p := New(engine, baseDestination, collisionPolicy)
+	p.flatDestination = true
+	return p
 }
 
 // Plan creates the proposed set of operations
@@ -56,7 +68,14 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 			}
 			destDir = strings.ReplaceAll(destDir, "{ext}", extName)
 		}
-		if p.baseDestination != "" {
+
+		// In flat mode every match goes straight into the base destination,
+		// dropping the rule's category folder entirely.
+		if p.flatDestination {
+			if p.baseDestination != "" {
+				destDir = p.baseDestination
+			}
+		} else if p.baseDestination != "" {
 			destDir = filepath.Join(p.baseDestination, destDir)
 		}
 
