@@ -191,35 +191,11 @@ func newSortCmd() *cobra.Command {
 			}
 
 			if f.byDate {
-				// Group into year folders based on mod time
-				currentYear := "2026"
-				ruleList = append(ruleList,
-					models.Rule{
-						Name:        "Old Files (<2025)",
-						Priority:    22,
-						Destination: "Archive_Pre_2025",
-						Conditions: []models.Condition{
-							{Field: models.FieldDate, Operator: models.OpLessThan, Value: "2025-01-01"},
-						},
-					},
-					models.Rule{
-						Name:        "Year 2025",
-						Priority:    21,
-						Destination: "2025",
-						Conditions: []models.Condition{
-							{Field: models.FieldDate, Operator: models.OpGreaterEq, Value: "2025-01-01"},
-							{Field: models.FieldDate, Operator: models.OpLessThan, Value: "2026-01-01"},
-						},
-					},
-					models.Rule{
-						Name:        "Recent (" + currentYear + ")",
-						Priority:    20,
-						Destination: currentYear,
-						Conditions: []models.Condition{
-							{Field: models.FieldDate, Operator: models.OpGreaterEq, Value: "2026-01-01"},
-						},
-					},
-				)
+				ruleList = append(ruleList, models.Rule{
+					Name:        "Year",
+					Priority:    20,
+					Destination: "{year}",
+				})
 			}
 
 			// If no rule specified, default to downloads preset
