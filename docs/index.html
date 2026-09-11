@@ -23,7 +23,7 @@
         <a class="brand" href="index.html" aria-label="CHEST Homepage">
           <img src="assets/logo1.png" alt="CHEST Logo" class="brand-logo-img">
           <span>chest</span>
-          <span class="brand-tag">v0.1.1</span>
+          <!-- <span class="brand-tag">v0.1.1</span> -->
         </a>
         <div class="nav-links">
           <a class="nav-link" href="#overview"><i data-lucide="compass"></i> Overview</a>
@@ -113,6 +113,9 @@
           </button>
           <button class="term-cmd-chip" data-cmd="duplicates" type="button">
             <i data-lucide="copy"></i> chest duplicates
+          </button>
+          <button class="term-cmd-chip" data-cmd="speedtest" type="button">
+            <i data-lucide="gauge"></i> chest speedtest
           </button>
           <button class="term-cmd-chip" data-cmd="undo" type="button">
             <i data-lucide="rotate-ccw"></i> chest undo
@@ -281,6 +284,18 @@
           <p class="cmd-desc">Finds exact byte-for-byte duplicate files across paths using incremental parallel SHA-256 hashes, with <code>--except</code> to skip noisy directories.</p>
           <div class="cmd-snippet">
             <span>chest duplicates ~/Projects --except node_modules,venv</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
+            <span class="cmd-tag">chest speedtest</span>
+            <i data-lucide="gauge" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc">Compares Ookla and Cloudflare download, upload, ping, and jitter results. Transfer rows use a 16-cell diamond gauge with <code>◆</code> filled and <code>◇</code> empty cells.</p>
+          <div class="cmd-snippet">
+            <span>chest speedtest</span>
             <i data-lucide="chevron-right"></i>
           </div>
         </div>
