@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -280,7 +281,6 @@ func searchFileContent(filePath, query string, ignoreCase bool) (bool, string, i
 
 	var (
 		queryBytes = []byte(query)
-		scanner    = bufio.NewScanner(file)
 		lineNum    = 0
 	)
 
@@ -288,6 +288,14 @@ func searchFileContent(filePath, query string, ignoreCase bool) (bool, string, i
 		queryBytes = bytes.ToLower(queryBytes)
 	}
 
+	// Binary guard: scanning a binary file as text would leak raw bytes into
+	// the terminal output, so skip any file whose first chunk contains a NUL
+	// byte (the same heuristic grep uses to detect binary files).
+	if isBinaryFile(file) {
+		return false, "", 0
+	}
+
+	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Bytes()
@@ -297,7 +305,7 @@ func searchFileContent(filePath, query string, ignoreCase bool) (bool, string, i
 		}
 
 		if bytes.Contains(checkLine, queryBytes) {
-			snippet := strings.TrimSpace(string(line))
+			snippet := sanitizeSnippet(line)
 			if len(snippet) > 120 {
 				snippet = snippet[:117] + "..."
 			}
@@ -306,6 +314,40 @@ func searchFileContent(filePath, query string, ignoreCase bool) (bool, string, i
 	}
 
 	return false, "", 0
+}
+
+// isBinaryFile reports whether a file's first chunk contains a NUL byte,
+// which is a strong indicator that it holds binary (non-text) content.
+func isBinaryFile(f *os.File) bool {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+	var head [8192]byte
+	n, err := f.Read(head[:])
+	if err != nil || n == 0 {
+		return false
+	}
+	for i := 0; i < n; i++ {
+		if head[i] == 0 {
+			return true
+		}
+	}
+	// Reset the read position so the scanner re-reads from the start.
+	_, _ = f.Seek(0, io.SeekStart)
+	return false
+}
+
+// sanitizeSnippet strips C0 control characters (0x00-0x1F, preserving tab)
+// from a matched line and trims surrounding whitespace, so no raw bytes can
+// corrupt the terminal when the snippet is printed.
+func sanitizeSnippet(line []byte) string {
+	var out []byte
+	for _, c := range line {
+		if c == '\t' || c >= 0x20 {
+			out = append(out, c)
+		}
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func matchesSizeCondition(size int64, cond string) bool {

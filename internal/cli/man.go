@@ -280,9 +280,24 @@ complete chest; it is only needed once, and regenerating it is harmless.`,
 		SeeAlso: []string{"watch", "man"},
 	},
 	"update": {
-		Name:        "CHEST-UPDATE(1)-TO Update the chest tool ",
-		Synopsis:    "chest update",
-		Description: `chest update command is used to update the current version to the latest version of chest tool,`,
+		Name:     "CHEST-UPDATE(1) - Self-Update",
+		Synopsis: "chest update",
+		Description: `Updates CHEST to the latest published version.
+
+Runs the Go toolchain's "go install" on the CHEST source module, which rebuilds
+the binary from source and replaces the copy in your Go bin directory. A live
+progress spinner is shown while the update runs. Because the currently running
+process has already loaded the old binary, restart CHEST after the update to
+start using the new version.
+
+Requires the Go toolchain installed and available on your PATH.`,
+		Options: []string{
+			"-h, --help          Show brief CLI help for update",
+		},
+		Examples: []string{
+			"chest update                      Update CHEST to the latest published version",
+		},
+		SeeAlso: []string{"version", "man"},
 	},
 }
 
