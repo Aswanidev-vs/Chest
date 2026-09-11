@@ -11,6 +11,11 @@ import (
 
 var speedSpin *spinner
 
+const (
+	barFilled = "\u25c6"
+	barEmpty  = "\u25c7"
+)
+
 // printSpin starts an in-place spinner with the given message on errOut,
 // replacing any previous spinner between phases.
 func printSpin(errOut io.Writer, msg string) {
@@ -27,7 +32,7 @@ func clearSpin(errOut io.Writer) {
 }
 
 // printSpeedTable renders the final comparison report: a banner, one grouped
-// section per backend, and a legend. ASCII-only, colored via the shared palette.
+// section per backend, and a legend. Colored via the shared palette.
 func printSpeedTable(w io.Writer, rows []speedResult) {
 	if len(rows) == 0 {
 		return
@@ -144,22 +149,36 @@ func printSpeedRow(w io.Writer, r speedResult, maxMbps float64) {
 	if metric == "download" || metric == "upload" {
 		var v float64
 		fmt.Sscanf(r.detail, "%f", &v)
-		filled := 0
+		fraction := 0.0
 		if maxMbps > 0 {
-			filled = int(v / maxMbps * float64(barW))
+			fraction = v / maxMbps
 		}
-		if filled > barW {
-			filled = barW
-		}
-		if filled < 1 {
-			filled = 1
-		}
-		bar = "[" + chestPrimary + strings.Repeat("#", filled) +
-			chestDim + strings.Repeat("-", barW-filled) + chestReset + "]"
+		bar, _ = speedBar(fraction)
+		bar = "[" + chestPrimary + bar + chestReset + "]"
 	}
 
 	fmt.Fprintf(w, "  %-9s %s%10s%s  %s  %s%s%s\n",
 		metric, chestPrimary, val, chestReset, bar, chestDim, detail, chestReset)
+}
+
+func speedBar(fraction float64) (string, int) {
+	const barW = 16
+	if fraction < 0 {
+		fraction = 0
+	} else if fraction > 1 {
+		fraction = 1
+	}
+	if fraction > 0 && fraction < 1.0/float64(barW) {
+		fraction = 1.0 / float64(barW)
+	}
+
+	rawFilled := fraction * float64(barW)
+	occupied := int(rawFilled)
+	if rawFilled > float64(occupied) {
+		occupied++
+	}
+
+	return strings.Repeat(barFilled, occupied) + strings.Repeat(barEmpty, barW-occupied), occupied
 }
 
 func truncate(s string, n int) string {
