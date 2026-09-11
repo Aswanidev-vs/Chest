@@ -86,4 +86,5 @@ func init() {
 	rootCmd.AddCommand(newCompletionCmd())
 	rootCmd.AddCommand(newManCmd())
 	rootCmd.AddCommand(newUpdateCmd())
+	rootCmd.AddCommand(newSpeedtestCmd())
 }

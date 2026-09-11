@@ -39,7 +39,7 @@ and local SQLite metadata indexing.`,
 			"chest stats                          Display storage distribution analytics",
 			"chest man sort                       Show full manual page for sort command",
 		},
-		SeeAlso: []string{"sort", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean"},
+		SeeAlso: []string{"sort", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean", "speedtest"},
 	},
 	"sort": {
 		Name:     "CHEST-SORT(1) - File Organization",
@@ -312,6 +312,28 @@ Requires the Go toolchain installed and available on your PATH.`,
 			"chest update                      Update CHEST to the latest published version",
 		},
 		SeeAlso: []string{"version", "man"},
+	},
+	"speedtest": {
+		Name:     "CHEST-SPEEDTEST(1) - Network Speed Test",
+		Synopsis: "chest speedtest [flags]",
+		Description: `Measure your connection speed from the terminal - no API key required.
+Runs TWO independent tests side-by-side and shows a comparison table:
+  - Ookla      real speedtest.net protocol: nearest server, multi-stream DL/UL, latency/jitter (accurate)
+  - Cloudflare  stdlib test against speed.cloudflare.com (reference)
+Use --ookla or --cloudflare to run only one. Use --json for machine output.`,
+		Options: []string{
+			"--ookla              Run only the Ookla (speedtest.net) test",
+			"--cloudflare         Run only the Cloudflare test",
+			"-j, --json           Output results as machine-readable JSON",
+			"-h, --help           Show brief CLI help",
+		},
+		Examples: []string{
+			"chest speedtest                        Run both tests and compare",
+			"chest speedtest --ookla               Only the accurate Ookla test",
+			"chest speedtest --cloudflare          Only the quick Cloudflare test",
+			"chest speedtest --json                Machine-readable JSON output",
+		},
+		SeeAlso: []string{"update", "man"},
 	},
 }
 
