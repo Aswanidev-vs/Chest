@@ -13,6 +13,7 @@ type manTopic struct {
 	Description string
 	Options     []string
 	Examples    []string
+	Concepts    []string
 	SeeAlso     []string
 }
 
@@ -38,7 +39,7 @@ and local SQLite metadata indexing.`,
 			"chest stats                          Display storage distribution analytics",
 			"chest man sort                       Show full manual page for sort command",
 		},
-		SeeAlso: []string{"sort", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean"},
+		SeeAlso: []string{"sort", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean", "speedtest"},
 	},
 	"sort": {
 		Name:     "CHEST-SORT(1) - File Organization",
@@ -48,12 +49,13 @@ Evaluates built-in presets or user-defined custom rules with priority ranking.
 Supports dry-run preview and automatic creation of destination folders.`,
 		Options: []string{
 			"-t, --type           Sort files into category folders (Images, Videos, Documents...)",
-			"-f, --format         Sort files into folders by extension (png, pdf, mp4...)",
+			"-f, --format         Boolean flag (no value). Group files into folders by their real extension, e.g. MP4/, MP3/, PNG/ (uses each file's actual extension)",
 			"-s, --size           Sort files by size thresholds (Tiny, Small, Medium, Large, Huge)",
 			"-d, --date           Sort files by modification year/month (YYYY/MM)",
 			"-p, --preset <name>  Apply built-in preset (downloads, media, developer, documents, photos)",
 			"-r, --rule <spec>    Custom rule on the fly (e.g. 'type=video && size>1GB -> Videos/Large')",
 			"-i, --into <dir>     Base destination directory to move organized files into",
+			"--name <name>        Move ALL matching files flat into one folder in the target dir (e.g. --name \"Anime\" -> Anime/*.mp4); cannot be combined with --into",
 			"-n, --dry-run        Simulate organization without moving any files",
 			"-y, --yes            Skip interactive confirmation prompt",
 			"-c, --collision      Collision policy: skip (default), rename, replace, abort",
@@ -65,7 +67,17 @@ Supports dry-run preview and automatic creation of destination folders.`,
 			"chest sort ~/Downloads -t -p media   Sort downloads using media preset into categories",
 			"chest sort --dry-run                 Preview what files would be moved without changing anything",
 			"chest sort --rule \"*.mkv -> Movies\" Move all MKV files to Movies folder",
+			"chest sort --format                          Group by real extension -> MP4/, MP3/, PNG/ folders",
+			"chest sort --format --into \"out\"            Group by extension AND put all those folders inside ./out/",
 			"chest sort -t --into \"Organized\"   Put all categorized folders inside ./Organized/",
+			"chest sort -t --name \"Anime\"            Move all matched files flat into one folder named Anime",
+			"chest sort --rule \"*.mp4 -> Anime\"    \"->\" = move into that folder; here only *.mp4 files go into Anime",
+		},
+		Concepts: []string{
+			"CATEGORY MODES  -t/--type, -f/--format, -s/--size and -d/--date split a batch into MULTIPLE category folders (Images/, MP4/, Large Files/, 2025/).",
+			"FLAT MODES      --name <x> or --rule \"<matcher> -> <x>\" put matches into ONE folder. --name takes every matched file; --rule lets you choose WHICH files.",
+			"WRAPPING        --into <dir> places any mode's folders inside <dir>, e.g. --format --into out -> out/MP4/f.mp4.",
+			"RULE ARROW      In --rule, \"->\" means \"move into this folder\": the left side is what to match, the right side is the destination folder.",
 		},
 		SeeAlso: []string{"preset", "undo", "history", "watch"},
 	},
@@ -107,12 +119,14 @@ into compartments according to chosen presets or rules.`,
 			"-r, --rule <spec>    Custom rule expression to apply",
 			"-d, --debounce <dur> Settle duration before moving file (default: 500ms)",
 			"-n, --dry-run        Print actions without actually moving files",
+			"--name <name>        Move ALL incoming matching files flat into one folder in the watched dir (e.g. --name \"Anime\" -> Anime/*.mp4)",
 			"--allow-system       Allow monitoring and moving in protected system directories",
 		},
 		Examples: []string{
 			"chest watch ~/Downloads             Continuously organize downloads as files arrive",
 			"chest watch ~/Downloads -p media    Watch and sort downloads using media preset",
 			"chest watch ~/Desktop --rule \"*.png -> Screenshots\" Auto-move screenshot files",
+			"chest watch ~/Downloads --name \"Anime\"   Watch and dump every incoming file flat into a folder named Anime",
 		},
 		SeeAlso: []string{"sort", "preset"},
 	},
@@ -279,6 +293,48 @@ complete chest; it is only needed once, and regenerating it is harmless.`,
 		},
 		SeeAlso: []string{"watch", "man"},
 	},
+	"update": {
+		Name:     "CHEST-UPDATE(1) - Self-Update",
+		Synopsis: "chest update",
+		Description: `Updates CHEST to the latest published version.
+
+Runs the Go toolchain's "go install" on the CHEST source module, which rebuilds
+the binary from source and replaces the copy in your Go bin directory. A live
+progress spinner is shown while the update runs. Because the currently running
+process has already loaded the old binary, restart CHEST after the update to
+start using the new version.
+
+Requires the Go toolchain installed and available on your PATH.`,
+		Options: []string{
+			"-h, --help          Show brief CLI help for update",
+		},
+		Examples: []string{
+			"chest update                      Update CHEST to the latest published version",
+		},
+		SeeAlso: []string{"version", "man"},
+	},
+	"speedtest": {
+		Name:     "CHEST-SPEEDTEST(1) - Network Speed Test",
+		Synopsis: "chest speedtest [flags]",
+		Description: `Measure your connection speed from the terminal - no API key required.
+Runs TWO independent tests side-by-side and shows a comparison table:
+  - Ookla      real speedtest.net protocol: nearest server, multi-stream DL/UL, latency/jitter (accurate)
+  - Cloudflare  stdlib test against speed.cloudflare.com (reference)
+Use --ookla or --cloudflare to run only one. Use --json for machine output.`,
+		Options: []string{
+			"--ookla              Run only the Ookla (speedtest.net) test",
+			"--cloudflare         Run only the Cloudflare test",
+			"-j, --json           Output results as machine-readable JSON",
+			"-h, --help           Show brief CLI help",
+		},
+		Examples: []string{
+			"chest speedtest                        Run both tests and compare",
+			"chest speedtest --ookla               Only the accurate Ookla test",
+			"chest speedtest --cloudflare          Only the quick Cloudflare test",
+			"chest speedtest --json                Machine-readable JSON output",
+		},
+		SeeAlso: []string{"update", "man"},
+	},
 }
 
 func newManCmd() *cobra.Command {
@@ -365,6 +421,14 @@ func printManPage(t manTopic) {
 				fmt.Println()
 			}
 		}
+	}
+
+	if len(t.Concepts) > 0 {
+		fmt.Printf("%sCONCEPTS%s\n", bold, reset)
+		for _, c := range t.Concepts {
+			fmt.Printf("    %s\n", c)
+		}
+		fmt.Println()
 	}
 
 	if len(t.SeeAlso) > 0 {

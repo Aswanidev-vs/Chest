@@ -27,6 +27,7 @@ type sortFlags struct {
 	bySize         bool
 	byDate         bool
 	into           string
+	name           string
 	preset         string
 	dryRun         bool
 	yes            bool
@@ -318,7 +319,27 @@ func newSortCmd() *cobra.Command {
 			ruleList = expandedRules
 
 			engine := rules.NewEngine(ruleList)
-			pl := planner.New(engine, f.into, collisionPolicy)
+
+			// Base destination: --into gives an explicit path, --name a simple
+			// folder name created inside the target directory. --into wraps the
+			// category folders (into/Images/...), while --name puts every match
+			// flat into one named folder (e.g. --name "Anime" -> Anime/*.mp4).
+			baseDest := f.into
+			flat := false
+			if f.name != "" {
+				if f.into != "" {
+					return fmt.Errorf("cannot combine --name and --into; choose one destination")
+				}
+				baseDest = filepath.Join(absTarget, f.name)
+				flat = true
+			}
+
+			var pl *planner.Planner
+			if flat {
+				pl = planner.NewFlat(engine, baseDest, collisionPolicy)
+			} else {
+				pl = planner.New(engine, baseDest, collisionPolicy)
+			}
 
 			plan, err := pl.Plan(absTarget, files)
 			if err != nil {
@@ -409,10 +430,11 @@ func newSortCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVarP(&f.byType, "type", "t", false, "Sort by file type")
-	cmd.Flags().BoolVarP(&f.byFormat, "format", "f", false, "Sort by extension/format")
+	cmd.Flags().BoolVarP(&f.byFormat, "format", "f", false, "Boolean; group files into folders by their real extension (MP4/, MP3/, PNG/). Take no value")
 	cmd.Flags().BoolVarP(&f.bySize, "size", "s", false, "Sort by file size")
 	cmd.Flags().BoolVarP(&f.byDate, "date", "d", false, "Sort by date")
 	cmd.Flags().StringVarP(&f.into, "into", "i", "", "Custom destination folder")
+	cmd.Flags().StringVar(&f.name, "name", "", "Move all matched files flat into this folder inside the target directory (e.g. --name \"Anime\" -> Anime/*.mp4); cannot be combined with --into")
 	cmd.Flags().StringVarP(&f.preset, "preset", "p", "", "Use predefined preset (downloads, media, documents, developer, photos)")
 	cmd.Flags().BoolVarP(&f.dryRun, "dry-run", "n", false, "Preview changes without modifying filesystem")
 	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "Skip confirmation prompt")

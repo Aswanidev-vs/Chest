@@ -64,8 +64,9 @@
             <li><a class="docs-nav-link" href="#cmd-undo">chest undo & history</a></li>
             <li><a class="docs-nav-link" href="#cmd-index">chest index & clean</a></li>
             <li><a class="docs-nav-link" href="#cmd-intel">stats, dupes & analyze</a></li>
+            <li><a class="docs-nav-link" href="#cmd-speedtest">chest speedtest</a></li>
             <li><a class="docs-nav-link" href="#cmd-man">man, preset & version</a></li>
-          <li><a class="docs-nav-link" href="#cmd-completion">chest completion</a></li>
+            <li><a class="docs-nav-link" href="#cmd-completion">chest completion</a></li>
           </ul>
         </div>
 
@@ -414,6 +415,57 @@
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Downloads</span>      <span class="t-comment"># Locate byte-for-byte duplicates</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Projects</span> <span class="t-flag">--except</span> node_modules,venv <span class="t-comment"># Skip noisy dirs</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">analyze</span> <span class="t-path">~/Documents</span>         <span class="t-comment"># Find zero-byte files and stale items (&gt;180 days); footer shows total run time</span></code></pre>
+          </div>
+
+          <h3 id="cmd-speedtest">chest speedtest</h3>
+          <p>Measures connection speed without an API key by running independent Ookla and Cloudflare tests side by side. The report includes download, upload, ping, and jitter. Select a backend with <code>--ookla</code> or <code>--cloudflare</code>, or use <code>--json</code> for machine-readable output.</p>
+          <div class="code-block-wrapper">
+            <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span>                 <span class="t-comment"># Run both tests and compare</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span> <span class="t-flag">--ookla</span>        <span class="t-comment"># Run the accurate Ookla test only</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span> <span class="t-flag">--cloudflare</span> <span class="t-comment"># Run the Cloudflare reference test only</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span> <span class="t-flag">--json</span>        <span class="t-comment"># Emit structured JSON instead of the table</span></code></pre>
+          </div>
+
+          <table class="flag-table">
+            <thead>
+              <tr>
+                <th>Flag</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="flag-badge">--ookla</span></td>
+                <td>boolean</td>
+                <td>Run only the Ookla test against the nearest available speedtest.net server.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--cloudflare</span></td>
+                <td>boolean</td>
+                <td>Run only the Cloudflare test against <code>speed.cloudflare.com</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--json</span></td>
+                <td>boolean</td>
+                <td>Output structured JSON instead of the human-readable comparison table.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4>Output & diamond gauge</h4>
+          <p>The default report groups successful measurements by backend. Download and upload rows include a 16-cell gauge: <code>◆</code> marks a filled cell and <code>◇</code> marks an empty cell. Transfer bars are scaled against the fastest successful download or upload in the comparison, making relative throughput easy to scan; ping rows show latency and jitter without a gauge. Failed measurements are marked <code>FAIL</code> with the error detail, while <code>--json</code> returns the same measurements as structured rows.</p>
+          <div class="code-block-wrapper">
+            <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span>
+  <span class="t-key">CHEST SPEED TEST</span>
+  <span class="t-key">Ookla</span>
+    <span class="t-cmd">download</span> <span class="t-ok">800.00 Mbps</span>  <span class="t-key">[◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆]</span>
+    <span class="t-cmd">upload</span>   <span class="t-ok">200.00 Mbps</span>  <span class="t-key">[◆◆◆◆◇◇◇◇◇◇◇◇◇◇◇◇]</span>
+  <span class="t-key">Cloudflare</span>
+    <span class="t-cmd">download</span> <span class="t-ok">400.00 Mbps</span>  <span class="t-key">[◆◆◆◆◆◆◆◆◇◇◇◇◇◇◇◇]</span>
+    <span class="t-cmd">upload</span>   <span class="t-ok">100.00 Mbps</span>  <span class="t-key">[◆◆◇◇◇◇◇◇◇◇◇◇◇◇◇◇]</span></code></pre>
           </div>
 
           <h3 id="cmd-man">man, preset & version</h3>

@@ -64,6 +64,7 @@ make build
   - Automatic safeguards preventing modification to OS root volumes (`/`, `C:\`) and system paths (`C:\Windows`, `C:\Program Files`, `/etc`, `/usr`, `/var`, etc.).
   - Protected paths remain completely accessible for read-only commands (`search`, `stats`, `duplicates`, `analyze`, `index`).
   - Dangerous operations (`sort`, `watch`, `undo`) require explicit `--allow-system` override with confirmation.
+- **Network Speed Testing**: Compare Ookla (nearest speedtest.net server) and Cloudflare (`speed.cloudflare.com`) results, with download and upload bars shown as `◆` filled and `◇` empty diamonds; select `--ookla` or `--cloudflare`, or use `--json` for machine-readable output.
 - **Plugin Architecture**: Extend classification and rule handling through independent external processes using `hashicorp/go-plugin` over standard RPC.
 
 ---
@@ -80,6 +81,7 @@ make build
 | `chest undo cache` | Inspect undo cache or wipe all history (`--clear`) | `chest undo cache --clear` |
 | `chest index` | Index directory metadata into local SQLite (incremental, parallel) | `chest index ~/Documents --hash` |
 | `chest stats` | Display storage consumption and category breakdown | `chest stats` |
+| `chest speedtest` | Compare Ookla vs Cloudflare download/upload/ping/jitter; transfer bars use `◆` filled and `◇` empty diamonds | `chest speedtest` (both), `chest speedtest --ookla`, `chest speedtest --cloudflare`, `chest speedtest --json` |
 | `chest duplicates` | Locate duplicate files using content hashes (`--except` to skip dirs/globs) | `chest duplicates ~/Downloads --except node_modules,venv` |
 | `chest analyze` | Read-only audit of storage distribution and old files, with total run time in the report footer | `chest analyze ~/Downloads` |
 | `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |

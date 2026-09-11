@@ -74,6 +74,20 @@ and content grep (-c).`,
 				defer pluginCleanup()
 			}
 
+			// Live search progress: a spinner on stderr shows how many files
+			// have been traversed and matches found so far, so the screen isn't
+			// blank during a slow walk. Results still print to stdout, and the
+			// spinner is a no-op when output isn't a terminal.
+			state := newProgressState()
+			spinner := newSpinner(cmd.ErrOrStderr(), func() string {
+				scanned, matched := state.get()
+				if scanned == 1 {
+					return fmt.Sprintf("Searching… %d file scanned, %d matches", scanned, matched)
+				}
+				return fmt.Sprintf("Searching… %d files scanned, %d matches", scanned, matched)
+			})
+			defer spinner.stop()
+
 			engine := search.New(search.SearchOptions{
 				Pattern:       pattern,
 				RootPath:      rootPath,
@@ -89,6 +103,7 @@ and content grep (-c).`,
 				IncludeHidden: includeHidden,
 				Limit:         limit,
 				ClassifyFunc:  classifyFunc,
+				Progress:      func(scanned, matched int) { state.set(scanned, matched) },
 			})
 
 			matches, err := engine.Search()

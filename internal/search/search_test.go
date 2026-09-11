@@ -3,6 +3,7 @@ package search
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -68,6 +69,75 @@ func TestSearchEngine(t *testing.T) {
 		}
 		if res[0].ContentLineNo != 1 {
 			t.Errorf("Expected line 1, got %d", res[0].ContentLineNo)
+		}
+	})
+
+	t.Run("Content search skips binary files", func(t *testing.T) {
+		// Binary file whose header contains the query bytes but also a NUL
+		// byte. It must NOT surface a raw snippet (previously it leaked
+		// raw bytes and corrupted terminal output).
+		binFile := filepath.Join(tempDir, "data.wav")
+		_ = os.WriteFile(binFile, []byte("RIFF\x00\x00chest_vault\x00WAVE"), 0644)
+
+		eng := New(SearchOptions{
+			RootPath:     tempDir,
+			ContentQuery: "chest_vault",
+		})
+		res, err := eng.Search()
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		for _, m := range res {
+			if m.Name == "data.wav" {
+				t.Fatal("binary file leaked into content search results")
+			}
+		}
+		if len(res) != 1 || res[0].Name != "notes.txt" {
+			t.Fatalf("Expected only notes.txt to match, got %d", len(res))
+		}
+	})
+
+	t.Run("Progress callback reports scanned and matched", func(t *testing.T) {
+		var mu sync.Mutex
+		var lastScanned, lastMatched int
+		calls := 0
+
+		eng := New(SearchOptions{
+			RootPath: tempDir,
+			Pattern:  "notes",
+			Progress: func(scanned, matched int) {
+				mu.Lock()
+				defer mu.Unlock()
+				calls++
+				lastScanned = scanned
+				lastMatched = matched
+			},
+		})
+		if _, err := eng.Search(); err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+		if calls == 0 {
+			t.Fatal("Progress callback was never called")
+		}
+		// "notes" fuzzy-matches notes.txt, so by the time the walk ends we must
+		// have scanned at least one file and matched at least one.
+		if lastScanned < 1 {
+			t.Errorf("lastScanned = %d, want >= 1", lastScanned)
+		}
+		if lastMatched < 1 {
+			t.Errorf("lastMatched = %d, want >= 1 (notes.txt matches 'notes')", lastMatched)
+		}
+	})
+
+	t.Run("Snippet strips control characters", func(t *testing.T) {
+		// ESC (0x1B) and NUL are dropped; printable text (including the
+		// literal "[31m" that followed the ESC) is preserved, so no control
+		// byte can reach the terminal.
+		if got := sanitizeSnippet([]byte("\x1b[31mAB\x00C\tDE\x1b[0m")); got != "[31mABC\tDE[0m" {
+			t.Fatalf("sanitizeSnippet = %q, want %q", got, "[31mABC\tDE[0m")
 		}
 	})
 }

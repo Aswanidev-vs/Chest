@@ -3,3 +3,4 @@ testing/
 *.exe
 /chest
 *.log
+test/
