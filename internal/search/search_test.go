@@ -3,6 +3,7 @@ package search
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -93,6 +94,41 @@ func TestSearchEngine(t *testing.T) {
 		}
 		if len(res) != 1 || res[0].Name != "notes.txt" {
 			t.Fatalf("Expected only notes.txt to match, got %d", len(res))
+		}
+	})
+
+	t.Run("Progress callback reports scanned and matched", func(t *testing.T) {
+		var mu sync.Mutex
+		var lastScanned, lastMatched int
+		calls := 0
+
+		eng := New(SearchOptions{
+			RootPath: tempDir,
+			Pattern:  "notes",
+			Progress: func(scanned, matched int) {
+				mu.Lock()
+				defer mu.Unlock()
+				calls++
+				lastScanned = scanned
+				lastMatched = matched
+			},
+		})
+		if _, err := eng.Search(); err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+		if calls == 0 {
+			t.Fatal("Progress callback was never called")
+		}
+		// "notes" fuzzy-matches notes.txt, so by the time the walk ends we must
+		// have scanned at least one file and matched at least one.
+		if lastScanned < 1 {
+			t.Errorf("lastScanned = %d, want >= 1", lastScanned)
+		}
+		if lastMatched < 1 {
+			t.Errorf("lastMatched = %d, want >= 1 (notes.txt matches 'notes')", lastMatched)
 		}
 	})
 

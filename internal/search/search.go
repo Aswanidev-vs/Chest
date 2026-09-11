@@ -38,6 +38,7 @@ type SearchOptions struct {
 	IncludeHidden bool
 	Limit         int
 	ClassifyFunc  func(filename, ext string) string // Optional: overrides built-in classifier
+	Progress      func(scanned, matched int)         // Optional: traversal progress (called per file)
 }
 
 // SearchMatch represents a single matching file and optional content snippets
@@ -103,6 +104,7 @@ func (e *Engine) Search() ([]SearchMatch, error) {
 	var (
 		mu      sync.Mutex
 		matches []SearchMatch
+		scanned int
 	)
 
 	walkConf := fastwalk.Config{
@@ -129,6 +131,19 @@ func (e *Engine) Search() ([]SearchMatch, error) {
 
 		if d.IsDir() {
 			return nil
+		}
+
+		// Report traversal progress synchronously. fastwalk may invoke this
+		// callback from several workers at once, so both counters are read and
+		// written under the same mutex that guards the matches list. The CLI
+		// layers a spinner on top of these counts; nil means no progress UI.
+		mu.Lock()
+		scanned++
+		progressScanned := scanned
+		progressMatched := len(matches)
+		mu.Unlock()
+		if e.opts.Progress != nil {
+			e.opts.Progress(progressScanned, progressMatched)
 		}
 
 		// Fast extension check

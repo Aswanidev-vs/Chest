@@ -2,9 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/term"
 
@@ -102,4 +104,82 @@ func analyzeWithProgress(store *indexer.Store, root string) (indexer.AnalyzeRepo
 	return store.AnalyzeProgress(root, func(pct int) {
 		bar.advance(pct)
 	})
+}
+
+// spinnerFrames is the braille animation shared by every spinner instance.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// spinner draws an in-place animated spinner on w, refreshing the message from
+// the status callback on every frame. It is a no-op (active=false) when stderr
+// is not a terminal, so piped/scripted output stays clean — the same TTY
+// detection used by newProgressBar.
+type spinner struct {
+	active bool
+	quit   chan struct{}
+	done   chan struct{}
+	w      io.Writer
+	status func() string
+}
+
+// newSpinner starts a spinner that shows status() on each tick. It always
+// returns a valid *spinner so callers can unconditionally defer stop().
+func newSpinner(w io.Writer, status func() string) *spinner {
+	s := &spinner{w: w, status: status}
+	if _, _, err := term.GetSize(int(os.Stderr.Fd())); err == nil {
+		s.active = true
+		s.quit = make(chan struct{})
+		s.done = make(chan struct{})
+		go s.spin()
+	}
+	return s
+}
+
+func (s *spinner) spin() {
+	defer close(s.done)
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+	for i := 0; ; i++ {
+		select {
+		case <-s.quit:
+			fmt.Fprint(s.w, "\r\x1b[2K") // clear the spinner line
+			return
+		case <-ticker.C:
+			fmt.Fprintf(s.w, "\r\x1b[38;5;114m%s\x1b[0m %s",
+				spinnerFrames[i%len(spinnerFrames)], s.status())
+		}
+	}
+}
+
+func (s *spinner) stop() {
+	if !s.active {
+		return
+	}
+	close(s.quit)
+	<-s.done
+}
+
+// progressState is a small mutex-guarded holder for sharing traversal counters
+// between concurrent walk workers (which update it) and a spinner goroutine
+// (which reads it). Kept in cli so the search engine stays a pure library.
+type progressState struct {
+	mu      sync.Mutex
+	scanned int
+	matched int
+}
+
+func newProgressState() *progressState {
+	return &progressState{}
+}
+
+func (s *progressState) set(scanned, matched int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scanned = scanned
+	s.matched = matched
+}
+
+func (s *progressState) get() (int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scanned, s.matched
 }

@@ -6,10 +6,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"time"
 
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // updateModule is what "go install" builds to fetch the latest published CHEST.
@@ -47,7 +45,9 @@ func Update(out, errOut io.Writer) error {
 	cmd.Stderr = &buf
 	cmd.Stdin = os.Stdin
 
-	spinner := newUpdateSpinner(errOut, "Updating CHEST to the latest version…")
+	spinner := newSpinner(errOut, func() string {
+		return "Updating CHEST to the latest version…"
+	})
 	err := cmd.Run()
 	spinner.stop()
 
@@ -61,53 +61,4 @@ func Update(out, errOut io.Writer) error {
 
 	fmt.Fprintln(out, "\nCHEST updated to the latest version. Restart chest to start using it.")
 	return nil
-}
-
-// updateSpinner draws an in-place spinner while "go install" runs. It is a
-// no-op when stderr is not a terminal, so piped/scripted output stays clean
-// (mirroring the progress bar in progress.go).
-type updateSpinner struct {
-	active bool
-	quit   chan struct{}
-	done   chan struct{}
-	w      io.Writer
-}
-
-var updateSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
-func newUpdateSpinner(w io.Writer, msg string) *updateSpinner {
-	s := &updateSpinner{w: w}
-	// Detect a TTY by attempting to read terminal size (same approach as
-	// newProgressBar); on error stderr is not an interactive terminal.
-	if _, _, err := term.GetSize(int(os.Stderr.Fd())); err == nil {
-		s.active = true
-		s.quit = make(chan struct{})
-		s.done = make(chan struct{})
-		go s.spin(msg)
-	}
-	return s
-}
-
-func (s *updateSpinner) spin(msg string) {
-	defer close(s.done)
-	ticker := time.NewTicker(80 * time.Millisecond)
-	defer ticker.Stop()
-	for i := 0; ; i++ {
-		select {
-		case <-s.quit:
-			fmt.Fprint(s.w, "\r\x1b[2K") // clear the spinner line
-			return
-		case <-ticker.C:
-			fmt.Fprintf(s.w, "\r\x1b[38;5;114m%s\x1b[0m %s",
-				updateSpinnerFrames[i%len(updateSpinnerFrames)], msg)
-		}
-	}
-}
-
-func (s *updateSpinner) stop() {
-	if !s.active {
-		return
-	}
-	close(s.quit)
-	<-s.done
 }
