@@ -279,6 +279,11 @@ complete chest; it is only needed once, and regenerating it is harmless.`,
 		},
 		SeeAlso: []string{"watch", "man"},
 	},
+	"update": {
+		Name:        "CHEST-UPDATE(1)-TO Update the chest tool ",
+		Synopsis:    "chest update",
+		Description: `chest update command is used to update the current version to the latest version of chest tool,`,
+	},
 }
 
 func newManCmd() *cobra.Command {
