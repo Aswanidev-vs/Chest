@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Aswanidev-vs/chest/internal/filesystem"
@@ -67,6 +68,9 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 				extName = "NO_EXT"
 			}
 			destDir = strings.ReplaceAll(destDir, "{ext}", extName)
+		}
+		if strings.Contains(destDir, "{year}") {
+			destDir = strings.ReplaceAll(destDir, "{year}", strconv.Itoa(file.ModTime.Year()))
 		}
 
 		// In flat mode every match goes straight into the base destination,

@@ -40,7 +40,7 @@ make build
 ## Core Features
 
 - **Concurrent Search Engine**: Built using `fastwalk` for parallel directory traversal and `fzf/src/algo` for exact and fuzzy scoring. Supports filtering by file category, extension, size, modification date, and in-file content grep.
-- **Rule-Based Organization**: Sort by extensions, categories, file size boundaries, and dates. Define custom rules on the CLI or use built-in presets (`downloads`, `media`, `documents`, `developer`, `photos`).
+- **Rule-Based Organization**: Sort by extensions, categories, file size boundaries, and modification year. Define custom rules on the CLI or use built-in presets (`downloads`, `media`, `documents`, `developer`, `photos`).
 - **Safety First**:
   - Full dry-run preview (`chest sort --dry-run` or `-n`) before files move.
   - Interactive confirmations.
@@ -73,7 +73,7 @@ make build
 
 | Command | Description | Example |
 |---|---|---|
-| `chest sort` | Sort files using presets, flags, or custom rules (`--allow-system` for OS dirs) | `chest sort ~/Downloads -t -p downloads` |
+| `chest sort` | Sort files using presets, flags, or custom rules; `--date` groups files into modification-year folders (`--allow-system` for OS dirs) | `chest sort ~/Downloads -d` |
 | `chest search` | Search files by name, metadata, or file content grep | `chest search "report" -e pdf -c "invoice"` |
 | `chest watch` | Continuously watch and organize incoming files (`--initial` sorts existing files first; `--allow-system` guard) | `chest watch ~/Downloads --preset media --initial` |
 | `chest history` | View previous operations log | `chest history` |
