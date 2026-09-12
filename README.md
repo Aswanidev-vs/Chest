@@ -52,14 +52,16 @@ make build
   - Storage analytics with `chest stats`.
   - Exact duplicate file detection with `chest duplicates`.
   - Stale and zero-byte file reports with `chest analyze`, with a total run-time footer showing how long the command took to generate the report.
+  - **Self-refreshing reports**: a scoped `stats`/`analyze` run re-indexes that folder each time, and a bare run re-populates an empty cache from the current directory (so `chest clean` never leaves you staring at all-zero reports). Re-indexing also **prunes** rows for files that were deleted/moved, or are now covered by `--except`.
   - Cache management with `chest index --clear` and `chest clean`.
 - **Shell Tab Completion**: One-liner setup with `chest completion --install` (auto-detects your shell from `$SHELL`). Tab-complete subcommands and flags in `bash`, `zsh`, and `fish`, or print/save the raw script with `chest completion <shell>`.
 - **Parallel Performance & Live Feedback**:
   - Incremental indexing skips unchanged files (using `size + mtime`) so repeated runs are near-instant.
   - Hashing and directory traversal run in parallel across CPU cores (`errgroup` + `fastwalk`), and SQLite writes are batched in transactions.
   - Live in-place progress bars on the long-wait commands: `index`, `duplicates`, `analyze`, and `sort`.
-- **Exclusion Flags (`--except` / `--exclude`)**:
-  - Prune noisy directories or globs (e.g. `node_modules`, `venv`, `.git`) before traversal: `chest duplicates ~/Projects --except node_modules,venv,.git`.
+- **Exclusion Flags (`--except`)**:
+  - Available on `index`, `stats`, `analyze`, and `duplicates` to prune noisy directories or globs (e.g. `node_modules`, `venv`, `.git`) before traversal — excluded paths are also removed from any previously-indexed rows: `chest duplicates ~/Projects --except node_modules,venv,.git`.
+  - Report freshness: a scoped `stats`/`analyze` auto-refreshes its folder each run, an empty cache is re-populated from the current directory automatically, and `--refresh` forces a re-scan with stale/excluded-row purge. Largest-file listings use absolute paths.
 - **System Path Protection Guard**:
   - Automatic safeguards preventing modification to OS root volumes (`/`, `C:\`) and system paths (`C:\Windows`, `C:\Program Files`, `/etc`, `/usr`, `/var`, etc.).
   - Protected paths remain completely accessible for read-only commands (`search`, `stats`, `duplicates`, `analyze`, `index`).
@@ -79,11 +81,11 @@ make build
 | `chest history` | View previous operations log | `chest history` |
 | `chest undo` | Revert latest operation or specific ID, auto-cleaning empty created directories | `chest undo` or `chest undo 3` |
 | `chest undo cache` | Inspect undo cache or wipe all history (`--clear`) | `chest undo cache --clear` |
-| `chest index` | Index directory metadata into local SQLite (incremental, parallel) | `chest index ~/Documents --hash` |
-| `chest stats` | Display storage consumption and category breakdown | `chest stats` |
+| `chest index` | Index directory metadata into local SQLite (incremental, parallel; `--except` to skip, prunes deleted/excluded rows on re-index) | `chest index ~/Documents --hash` |
+| `chest stats` | Display storage consumption and category breakdown; scoped runs auto-refresh, bare runs repopulate an empty cache, `--refresh` forces re-scan+purge, largest files shown with absolute paths | `chest stats ~/Projects --refresh` |
 | `chest speedtest` | Compare Ookla vs Cloudflare download/upload/ping/jitter; transfer bars use `◆` filled and `◇` empty diamonds | `chest speedtest` (both), `chest speedtest --ookla`, `chest speedtest --cloudflare`, `chest speedtest --json` |
-| `chest duplicates` | Locate duplicate files using content hashes (`--except` to skip dirs/globs) | `chest duplicates ~/Downloads --except node_modules,venv` |
-| `chest analyze` | Read-only audit of storage distribution and old files, with total run time in the report footer | `chest analyze ~/Downloads` |
+| `chest duplicates` | Locate duplicate files using content hashes (`--except` to skip dirs/globs; excluded rows are purged from the cache) | `chest duplicates ~/Downloads --except node_modules,venv` |
+| `chest analyze` | Read-only audit of storage distribution and old files (`--except`/`--refresh` supported; scoped runs auto-refresh, bare runs repopulate an empty cache), with total run time in the report footer | `chest analyze ~/Downloads --refresh` |
 | `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |
 | `chest clean` | Clear cached SQLite index with confirmation (`-y` to skip, `--all` for DB, `--history` to also wipe undo history) | `chest clean -y` |
 | `chest man` | Display detailed manual page with examples (like Linux man) | `chest man sort` |

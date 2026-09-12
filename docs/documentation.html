@@ -403,23 +403,24 @@
           </table>
 
           <h3 id="cmd-index">chest index & clean</h3>
-          <p>Index file paths and hashes into SQLite for fast duplicate discovery. Indexing is <em>incremental</em> (unchanged files are skipped), runs in parallel across CPU cores, and shows a live progress bar:</p>
+          <p>Index file paths and hashes into SQLite for fast duplicate discovery. Indexing is <em>incremental</em> (unchanged files are skipped), runs in parallel across CPU cores, shows a live progress bar, and re-indexing <em>prunes</em> rows for files that were deleted/moved or are now covered by <code>--except</code>. The <code>--except</code> flag is available on <code>index</code>, <code>stats</code>, <code>analyze</code>, and <code>duplicates</code>:</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">index</span> <span class="t-path">~/Documents</span> <span class="t-flag">--hash</span>    <span class="t-comment"># Incremental parallel SHA-256 with progress bar</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">clean</span>                       <span class="t-comment"># Prune deleted files from local index</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">index</span> <span class="t-path">~/Projects</span> <span class="t-flag">--except</span> node_modules,venv <span class="t-comment"># Skip noisy dirs on index</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">clean</span>                       <span class="t-comment"># Empty cached index (re-index to rebuild)</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">clean</span> <span class="t-flag">--all</span>                 <span class="t-comment"># Reset index database completely</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">clean</span> <span class="t-flag">--history</span>           <span class="t-comment"># Also wipe undo history (~/.chest/history.json)</span></code></pre>
           </div>
 
           <h3 id="cmd-intel">stats, duplicates & analyze</h3>
-          <p>Storage intelligence commands — duplicate detection re-verifies hashes and supports <code>--except</code> to prune noisy directories:</p>
+          <p>Storage intelligence commands. A scoped run always refreshes its folder first; a bare run re-populates an empty cache from the current directory instead of reporting all zeros. <code>--except</code> prunes noisy directories (and drops their previously-indexed rows), and <code>--refresh</code> forces a fresh re-scan with stale-row purge. Largest files are reported with absolute paths:</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
-            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-path">~/Projects</span>            <span class="t-comment"># Category and size breakdown</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Downloads</span>      <span class="t-comment"># Locate byte-for-byte duplicates</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Projects</span> <span class="t-flag">--except</span> node_modules,venv <span class="t-comment"># Skip noisy dirs</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">analyze</span> <span class="t-path">~/Documents</span>         <span class="t-comment"># Find zero-byte files and stale items (&gt;180 days); footer shows total run time</span></code></pre>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-path">~/Projects</span> <span class="t-flag">--except</span> node_modules <span class="t-comment"># Auto-refresh scope + category/size breakdown</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-flag">--refresh</span>          <span class="t-comment"># Force a fresh re-scan + purge of the current dir</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Downloads</span>  <span class="t-comment"># Locate byte-for-byte duplicates</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">analyze</span> <span class="t-path">~/Documents</span> <span class="t-flag">--refresh</span> <span class="t-comment"># Force fresh audit (zero-byte + stale &gt;180d)</span></code></pre>
           </div>
 
           <h3 id="cmd-speedtest">chest speedtest</h3>

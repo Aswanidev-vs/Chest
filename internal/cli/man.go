@@ -169,27 +169,44 @@ timestamp, target directory, count of moved files, and current status (Complete 
 		Synopsis: "chest index [path] [flags]",
 		Description: `Scans target directory and stores file metadata, sizes, categories, and
 optional cryptographic SHA256 hashes inside local SQLite database (~/.chest/index.db).
-Enables fast offline storage intelligence without cloud dependency.`,
+Enables fast offline storage intelligence without cloud dependency.
+
+Re-indexing also prunes rows for files that no longer exist on disk or are now
+covered by --except, keeping the cache free of stale paths.`,
 		Options: []string{
 			"--hash               Compute SHA256 hashes during indexing",
 			"--clear              Clear cached index records from SQLite files table",
+			"--except <dir,glob>  Exclude directories/files from the scan (comma-separated, globs allowed)",
 		},
 		Examples: []string{
 			"chest index ~/Documents              Index documents folder metadata",
 			"chest index ~/Downloads --hash       Index downloads and calculate hashes",
+			"chest index ~/Projects --except node_modules,venv   Skip noisy dirs",
 			"chest index --clear                  Empty cached index records",
 		},
 		SeeAlso: []string{"stats", "duplicates", "analyze", "clean"},
 	},
 	"stats": {
 		Name:     "CHEST-STATS(1) - Storage Analytics",
-		Synopsis: "chest stats",
+		Synopsis: "chest stats [path] [flags]",
 		Description: `Displays aggregated storage analytics from local index: total file count,
 total storage volume, breakdown per category (Images, Videos, Documents, Code...),
-and top largest files consuming disk space.`,
-		Options:  []string{},
-		Examples: []string{"chest stats"},
-		SeeAlso:  []string{"index", "analyze", "duplicates"},
+and top largest files consuming disk space (reported with absolute paths).
+
+A scoped stats run always re-indexes that folder first (auto-refresh). A bare
+run re-populates an empty cache from the current directory instead of reporting
+all zeros, and --refresh forces a fresh re-scan with stale/excluded-row purge.`,
+		Options: []string{
+			"--except <dir,glob>  Exclude directories/files from the scan (comma-separated, globs allowed)",
+			"--refresh            Force a fresh re-index (with stale/excluded-row purge) before reporting",
+		},
+		Examples: []string{
+			"chest stats                          Display cached storage analytics",
+			"chest stats ~/Downloads              Auto-refresh Downloads and show its breakdown",
+			"chest stats --refresh                Force refresh of the current directory",
+			"chest stats ~/Projects --except node_modules   Skip noisy directories",
+		},
+		SeeAlso: []string{"index", "analyze", "duplicates"},
 	},
 	"duplicates": {
 		Name:     "CHEST-DUPLICATES(1) - Duplicate Detection",
@@ -198,7 +215,9 @@ and top largest files consuming disk space.`,
 Groups candidates first by exact file size, then calculates hashes to guarantee
 100% accurate duplicate detection. Read-only operation; never deletes files automatically.
 Use --except to skip directories/files (e.g. node_modules, vendored deps) so large,
-noisy subtrees never get hashed during the scan.`,
+noisy subtrees never get hashed during the scan. Excluded paths are also removed
+from any previously-indexed rows on re-index. Reading/analytics commands
+(stats, analyze, duplicates) resolve paths case-insensitively on macOS/Windows.`,
 		Options: []string{
 			"--except <dir,glob>  Exclude directories/files from the scan (comma-separated, globs allowed)",
 		},
@@ -211,13 +230,24 @@ noisy subtrees never get hashed during the scan.`,
 	},
 	"analyze": {
 		Name:     "CHEST-ANALYZE(1) - Storage Health Audit",
-		Synopsis: "chest analyze [path]",
+		Synopsis: "chest analyze [path] [flags]",
 		Description: `Generates a comprehensive read-only intelligence report: storage volume,
 duplicate candidate sets, stale/old files (>180 days since last modification),
-empty 0-byte files, and largest storage consumers.`,
-		Options:  []string{},
-		Examples: []string{"chest analyze ~/Downloads"},
-		SeeAlso:  []string{"stats", "duplicates", "index"},
+empty 0-byte files, and largest storage consumers (reported with absolute paths).
+
+A scoped analyze run always re-indexes that folder first (auto-refresh). A bare
+run re-populates an empty cache from the current directory instead of reporting
+all zeros, and --refresh forces a fresh re-scan with stale/excluded-row purge.`,
+		Options: []string{
+			"--except <dir,glob>  Exclude directories/files from the scan (comma-separated, globs allowed)",
+			"--refresh            Force a fresh re-index (with stale/excluded-row purge) before reporting",
+		},
+		Examples: []string{
+			"chest analyze ~/Downloads              Auto-refresh and audit Downloads",
+			"chest analyze ~/Downloads --refresh    Force a fresh audit with purge",
+			"chest analyze --except node_modules    Skip noisy directories",
+		},
+		SeeAlso: []string{"stats", "duplicates", "index"},
 	},
 	"plugin": {
 		Name:     "CHEST-PLUGIN(1) - External Plugin Management",

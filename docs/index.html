@@ -281,7 +281,7 @@
             <span class="cmd-tag">chest duplicates</span>
             <i data-lucide="copy" style="color: var(--text-dim);"></i>
           </div>
-          <p class="cmd-desc">Finds exact byte-for-byte duplicate files across paths using incremental parallel SHA-256 hashes, with <code>--except</code> to skip noisy directories.</p>
+          <p class="cmd-desc">Finds exact byte-for-byte duplicate files across paths using incremental parallel SHA-256 hashes, with <code>--except</code> to skip noisy directories (excluded rows are also purged from the cache).</p>
           <div class="cmd-snippet">
             <span>chest duplicates ~/Projects --except node_modules,venv</span>
             <i data-lucide="chevron-right"></i>
@@ -305,9 +305,9 @@
             <span class="cmd-tag">chest stats</span>
             <i data-lucide="bar-chart-3" style="color: var(--text-dim);"></i>
           </div>
-          <p class="cmd-desc">Generates storage allocation breakdowns, largest file rankings, and stale item diagnostics.</p>
+          <p class="cmd-desc">Generates storage breakdowns, largest-file rankings (absolute paths), and stale-item diagnostics. Scoped runs auto-refresh; bare runs repopulate an empty cache; <code>--refresh</code> forces a re-scan + purge.</p>
           <div class="cmd-snippet">
-            <span>chest stats ~/Desktop</span>
+            <span>chest stats ~/Desktop --refresh</span>
             <i data-lucide="chevron-right"></i>
           </div>
         </div>
