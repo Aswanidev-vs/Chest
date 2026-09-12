@@ -14,10 +14,41 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// maybeRebuildEmptyIndex re-populates an empty cache from the given root (or
+// the current working directory when root is empty) so report commands don't
+// silently return all-zero results right after `chest clean` or a fresh
+// install. It is a safe no-op when the index already has data.
+func maybeRebuildEmptyIndex(store *indexer.Store, root string, computeHashes bool, except []string) error {
+	empty, err := store.IsEmpty()
+	if err != nil {
+		return err
+	}
+	if !empty {
+		return nil
+	}
+
+	target := root
+	if target == "" {
+		if cwd, werr := os.Getwd(); werr == nil {
+			target = cwd
+		} else {
+			target = "."
+		}
+	} else if abs, aerr := filepath.Abs(filepath.Clean(target)); aerr == nil {
+		target = abs
+	}
+
+	if _, err := indexWithProgress(store, target, computeHashes, except); err != nil {
+		return err
+	}
+	return nil
+}
+
 func newIndexCmd() *cobra.Command {
 	var (
 		computeHashes bool
 		clearIndex    bool
+		except        []string
 	)
 
 	cmd := &cobra.Command{
@@ -42,11 +73,14 @@ func newIndexCmd() *cobra.Command {
 			if len(args) > 0 {
 				path = args[0]
 			}
+			if abs, err := filepath.Abs(filepath.Clean(path)); err == nil {
+				path = abs
+			}
 
 			fmt.Printf("\x1b[38;5;254mIndexing directory \x1b[38;5;220m%s\x1b[0m...\n", path)
 			start := time.Now()
 
-			count, err := indexWithProgress(store, path, computeHashes)
+			count, err := indexWithProgress(store, path, computeHashes, except)
 			if err != nil {
 				return err
 			}
@@ -58,6 +92,8 @@ func newIndexCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&computeHashes, "hash", false, "Compute cryptographic SHA256 hashes during indexing")
 	cmd.Flags().BoolVar(&clearIndex, "clear", false, "Clear and truncate cached file index records")
+	cmd.Flags().StringSliceVar(&except, "except", nil,
+		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
 	return cmd
 }
 
@@ -140,7 +176,9 @@ func newCleanCmd() *cobra.Command {
 }
 
 func newStatsCmd() *cobra.Command {
-	return &cobra.Command{
+	var except []string
+
+	cmd := &cobra.Command{
 		Use:   "stats [path]",
 		Short: "Display storage and category statistics from local index",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -153,7 +191,17 @@ func newStatsCmd() *cobra.Command {
 			root := ""
 			if len(args) > 0 {
 				root = args[0]
+				if abs, err := filepath.Abs(filepath.Clean(root)); err == nil {
+					root = abs
+				}
 			}
+
+			// Re-populate an empty cache (e.g. after `chest clean`) instead of
+			// reporting all-zero stats.
+			if err := maybeRebuildEmptyIndex(store, root, false, except); err != nil {
+				return err
+			}
+
 			summary, err := store.GetStats(root)
 			if err != nil {
 				return err
@@ -178,7 +226,7 @@ func newStatsCmd() *cobra.Command {
 					if i >= 5 {
 						break
 					}
-					fmt.Printf("    %d. %s \x1b[38;5;246m(%s)\x1b[0m\n", i+1, f.RelPath, formatFileSize(f.Size))
+					fmt.Printf("    %d. %s \x1b[38;5;246m(%s)\x1b[0m\n", i+1, f.Path, formatFileSize(f.Size))
 				}
 			}
 
@@ -186,6 +234,10 @@ func newStatsCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringSliceVar(&except, "except", nil,
+		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
+	return cmd
 }
 
 func newDuplicatesCmd() *cobra.Command {
@@ -211,7 +263,9 @@ func newDuplicatesCmd() *cobra.Command {
 				if abs, err := filepath.Abs(filepath.Clean(root)); err == nil {
 					root = abs
 				}
-				_, _ = indexWithProgress(store, root, true, except)
+				if _, err := indexWithProgress(store, root, true, except); err != nil {
+					return err
+				}
 			}
 
 			groups, err := store.FindDuplicates(root)
@@ -252,7 +306,9 @@ func newDuplicatesCmd() *cobra.Command {
 }
 
 func newAnalyzeCmd() *cobra.Command {
-	return &cobra.Command{
+	var except []string
+
+	cmd := &cobra.Command{
 		Use:   "analyze [path]",
 		Short: "Analyze indexed filesystem data and report storage intelligence",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -276,7 +332,16 @@ func newAnalyzeCmd() *cobra.Command {
 				if abs, err := filepath.Abs(filepath.Clean(root)); err == nil {
 					root = abs
 				}
-				_, _ = indexWithProgress(store, root, true)
+				if _, err := indexWithProgress(store, root, true, except); err != nil {
+					return err
+				}
+			} else {
+				// No path given: re-populate an empty cache (e.g. right after
+				// `chest clean`) from the current directory instead of silently
+				// reporting all-zero results. Non-empty caches are left intact.
+				if err := maybeRebuildEmptyIndex(store, "", true, except); err != nil {
+					return err
+				}
 			}
 
 			// Analyze() is not instant: computing stats, scanning the duplicate
@@ -308,7 +373,7 @@ func newAnalyzeCmd() *cobra.Command {
 					if i >= 3 {
 						break
 					}
-					fmt.Printf("    • %s (%s)\n", f.Name, formatFileSize(f.Size))
+					fmt.Printf("    • %s (%s)\n", f.Path, formatFileSize(f.Size))
 				}
 			}
 
@@ -318,4 +383,8 @@ func newAnalyzeCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringSliceVar(&except, "except", nil,
+		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
+	return cmd
 }

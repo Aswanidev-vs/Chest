@@ -187,6 +187,78 @@ func TestCountFiles(t *testing.T) {
 	}
 }
 
+func countRows(t *testing.T, store *Store, root string) int {
+	t.Helper()
+	scope, args := pathScope(root)
+	query := "SELECT COUNT(*) FROM files"
+	if scope != "" {
+		query += " WHERE " + scope
+	}
+	var n int
+	if err := store.db.QueryRow(query, args...).Scan(&n); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	return n
+}
+
+func TestIndexDirectoryPurgesDeletedFiles(t *testing.T) {
+	store := newTestStore(t)
+	root := t.TempDir()
+
+	keep := filepath.Join(root, "keep.txt")
+	gone := filepath.Join(root, "gone.txt")
+	require.NoError(t, os.WriteFile(keep, []byte("keep"), 0644))
+	require.NoError(t, os.WriteFile(gone, []byte("gone"), 0644))
+
+	_, err := store.IndexDirectory(root, false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, countRows(t, store, root))
+
+	// Delete one file and re-index: its stale row must be removed.
+	require.NoError(t, os.Remove(gone))
+	_, err = store.IndexDirectory(root, false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, countRows(t, store, root), "deleted file's row should be purged")
+}
+
+func TestIndexDirectoryPurgesExcludedRows(t *testing.T) {
+	store := newTestStore(t)
+	root := t.TempDir()
+
+	// First index everything, including a file that will later be excluded.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "main.go"), []byte("go"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "notes.txt"), []byte("txt"), 0644))
+	_, err := store.IndexDirectory(root, false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, countRows(t, store, root))
+
+	// Re-index excluding *.txt: the previously-indexed txt row must vanish.
+	_, err = store.IndexDirectory(root, false, nil, []string{"*.txt"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, countRows(t, store, root), "excluded file's stale row should be purged")
+
+	var remain string
+	require.NoError(t, store.db.QueryRow(
+		"SELECT name FROM files WHERE name = 'main.go'").Scan(&remain))
+	assert.Equal(t, "main.go", remain)
+}
+
+func TestIsEmpty(t *testing.T) {
+	store := newTestStore(t)
+	empty, err := store.IsEmpty()
+	require.NoError(t, err)
+	assert.True(t, empty, "fresh store should be empty")
+
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0644))
+	_, err = store.IndexDirectory(root, false, nil)
+	require.NoError(t, err)
+
+	empty, err = store.IsEmpty()
+	require.NoError(t, err)
+	assert.False(t, empty, "store with indexed files should not be empty")
+}
+
 func TestIndexIncremental(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "incr.db")

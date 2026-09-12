@@ -147,6 +147,17 @@ func (s *Store) DeleteDB() error {
 	return os.Remove(s.dbPath)
 }
 
+// IsEmpty reports whether the cached index contains zero file records. Report
+// commands use this to detect an empty cache (e.g. right after `chest clean`)
+// and transparently re-populate instead of showing all-zero results.
+func (s *Store) IsEmpty() (bool, error) {
+	var n int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM files").Scan(&n); err != nil {
+		return false, err
+	}
+	return n == 0, nil
+}
+
 // RecordHistory saves operation run into SQLite
 func (s *Store) RecordHistory(directory string, ops []models.HistoryOperation) (*models.HistoryEntry, error) {
 	tx, err := s.db.Begin()
@@ -252,6 +263,12 @@ func (s *Store) MarkHistoryUndone(id int) error {
 // matched against each entry name and its path relative to root.
 func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(current int), exclusions ...[]string) (int, error) {
 	root = filepath.Clean(root)
+	if abs, aerr := filepath.Abs(root); aerr == nil {
+		// Store absolute paths so report scoping and stale-row purging are
+		// consistent regardless of how the user spelled the root (".", "./x",
+		// or "/abs/x"). duplicates/analyze already canonicalize before calling.
+		root = abs
+	}
 	exclSet := exclSetFromArgs(exclusions...)
 
 	// Snapshot the current index so unchanged files can be skipped incrementally
@@ -287,6 +304,8 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 	var (
 		processedCount int64 // files passed to the walker (drives progress)
 		indexedCount   int64 // rows actually inserted/updated
+		seen           = make(map[string]struct{})
+		seenMu         = &sync.Mutex{}
 	)
 
 	// A single writer goroutine drains rows and flushes them in batches. This
@@ -354,6 +373,9 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 		// a hash (or don't need one), keep the existing row untouched.
 		if meta, ok := existing[path]; ok && meta.size == size && meta.modUnix == modUnix {
 			if !computeHashes || meta.hash != "" {
+				seenMu.Lock()
+				seen[path] = struct{}{}
+				seenMu.Unlock()
 				return nil
 			}
 		}
@@ -369,6 +391,10 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 			}
 		}
 
+		seenMu.Lock()
+		seen[path] = struct{}{}
+		seenMu.Unlock()
+
 		rowsCh <- row{path, rel, name, ext, cat, size, modUnix, hashVal}
 		return nil
 	}
@@ -380,6 +406,25 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 	}
 	close(rowsCh)
 	<-writerDone
+
+	// Purge stale rows: paths previously indexed under this root that were
+	// neither seen on disk nor re-added this run — i.e. files that were
+	// deleted/moved, or that are now covered by the current --except
+	// exclusions. INSERT OR REPLACE never removes rows, so without this the
+	// cache would keep describing files that no longer exist.
+	del, derr := tx.Prepare("DELETE FROM files WHERE path = ?")
+	if derr == nil {
+		for p := range existing {
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			if !pathWithinRoot(root, p) {
+				continue
+			}
+			_, _ = del.Exec(p)
+		}
+		_ = del.Close()
+	}
 
 	if err := tx.Commit(); err != nil {
 		return 0, err
@@ -496,6 +541,22 @@ func normalizeRoot(root string) string {
 		return ""
 	}
 	return filepath.Clean(root)
+}
+
+// pathWithinRoot reports whether path is root itself or sits directly under it,
+// mirroring the trailing-separator prefix rule used by pathScope so sibling
+// directories can never be matched.
+func pathWithinRoot(root, path string) bool {
+	if root == "" {
+		return false
+	}
+	r := filepath.Clean(root)
+	p := filepath.Clean(path)
+	if p == r {
+		return true
+	}
+	pref := r + string(filepath.Separator)
+	return strings.HasPrefix(p, pref)
 }
 
 // pathScope builds a `path` prefix predicate (and its params) that narrows a

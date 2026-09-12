@@ -87,7 +87,10 @@ func (p *progressBar) finish() {
 // computes an accurate total up-front with a fast, hashing-free count (which
 // respects --except), then renders current/total during the real pass.
 func indexWithProgress(store *indexer.Store, path string, computeHashes bool, exclusions ...[]string) (int, error) {
-	total, _ := store.CountFiles(path, exclusions...)
+	total, err := store.CountFiles(path, exclusions...)
+	if err != nil {
+		return 0, err
+	}
 	bar := newProgressBar(total)
 	defer bar.finish()
 	return store.IndexDirectory(path, computeHashes, func(curr int) {
