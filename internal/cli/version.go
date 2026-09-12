@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var Version = "v0.3.2"
+var Version = "v0.4.0"
 
 func getCommitSHA() string {
 	info, ok := debug.ReadBuildInfo()
