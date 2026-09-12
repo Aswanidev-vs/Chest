@@ -259,6 +259,34 @@ func TestIsEmpty(t *testing.T) {
 	assert.False(t, empty, "store with indexed files should not be empty")
 }
 
+func TestMigrateRelativePaths(t *testing.T) {
+	store := newTestStore(t)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	// Simulate a legacy `chest index .` row with a relative path.
+	_, err = store.db.Exec(
+		"INSERT INTO files (path, rel_path, name, extension, size, mod_time, category, hash) VALUES (?, ?, 'foo.txt', 'txt', 3, 0, 'OTHER', '')",
+		"virtual/sub/foo.txt", "virtual/sub/foo.txt")
+	require.NoError(t, err)
+
+	// Force the migration to run in isolation (OpenOrCreate already stamped the
+	// marker on the freshly created empty store).
+	_, err = store.db.Exec("DELETE FROM meta WHERE key = 'paths_absolute_migrated'")
+	require.NoError(t, err)
+	require.NoError(t, store.migrateRelativePaths())
+
+	var abs, rel string
+	require.NoError(t, store.db.QueryRow(
+		"SELECT path, rel_path FROM files WHERE name = 'foo.txt'").Scan(&abs, &rel))
+	assert.True(t, filepath.IsAbs(abs), "legacy relative path should be made absolute")
+	assert.Equal(t, filepath.Join(cwd, "virtual", "sub", "foo.txt"), abs)
+	assert.Equal(t, filepath.Join("virtual", "sub", "foo.txt"), rel)
+
+	// Marker is set, so a second invocation must be a no-op and idempotent.
+	assert.NoError(t, store.migrateRelativePaths())
+}
+
 func TestIndexIncremental(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "incr.db")

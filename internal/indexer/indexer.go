@@ -115,13 +115,27 @@ func OpenOrCreate(customPath ...string) (*Store, error) {
 		reason TEXT,
 		FOREIGN KEY(entry_id) REFERENCES history_entries(id)
 	);
+
+	CREATE TABLE IF NOT EXISTS meta (
+		key TEXT PRIMARY KEY,
+		value TEXT
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed creating schema: %w", err)
 	}
 
-	return &Store{db: db, dbPath: dbPath}, nil
+	s := &Store{db: db, dbPath: dbPath}
+	// One-time normalization of legacy relative `path` values (from old
+	// `chest index .` runs that stored paths like "sub/foo.txt" instead of
+	// absolute paths) so report scoping and stale-row purging behave
+	// consistently. Runs at most once per store (guarded by a meta marker).
+	if err := s.migrateRelativePaths(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed normalizing legacy paths: %w", err)
+	}
+	return s, nil
 }
 
 // Store wraps SQLite index database
@@ -156,6 +170,72 @@ func (s *Store) IsEmpty() (bool, error) {
 		return false, err
 	}
 	return n == 0, nil
+}
+
+// migrateRelativePaths is a one-time upgrade that rewrites legacy relative
+// `path` values — produced by old `chest index .` runs that stored paths like
+// "sub/foo.txt" instead of absolute paths — to absolute paths rooted at the
+// current working directory. It runs at most once per store: after the first
+// successful pass a meta marker is written so subsequent opens skip the scan.
+func (s *Store) migrateRelativePaths() error {
+	var done string
+	if err := s.db.QueryRow("SELECT value FROM meta WHERE key = 'paths_absolute_migrated'").Scan(&done); err == nil && done == "1" {
+		return nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
+
+	rows, err := s.db.Query("SELECT path, rel_path FROM files")
+	if err != nil {
+		return err
+	}
+	type legacy struct{ path, rel string }
+	var pending []legacy
+	for rows.Next() {
+		var p legacy
+		if err := rows.Scan(&p.path, &p.rel); err != nil {
+			rows.Close()
+			return err
+		}
+		if !filepath.IsAbs(p.path) {
+			pending = append(pending, p)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	upd, err := tx.Prepare("UPDATE files SET path = ?, rel_path = ? WHERE path = ?")
+	if err != nil {
+		return err
+	}
+	for _, p := range pending {
+		abs := filepath.Join(cwd, filepath.Clean(p.path))
+		rel := p.rel
+		if r, rerr := filepath.Rel(cwd, abs); rerr == nil {
+			rel = r
+		}
+		if _, err := upd.Exec(abs, rel, p.path); err != nil {
+			upd.Close()
+			return err
+		}
+	}
+	upd.Close()
+
+	if _, err := tx.Exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('paths_absolute_migrated', '1')"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // RecordHistory saves operation run into SQLite
