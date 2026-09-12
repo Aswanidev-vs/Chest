@@ -14,10 +14,48 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// refreshIndexBeforeReport decides whether an indexing walk is needed before a
+// report command reads the cache, and runs it if so. It returns the target it
+// walked ("" when skipped). It runs (with stale-row & exclusion purge) when:
+//   - the user passed an explicit path (auto-refresh of that scope), or
+//   - --refresh was given (forced), or
+//   - the cache is empty (so a cleared/refreshed cache is repopulated).
+//
+// A bare (no-path) command can never re-walk the whole multi-root index, so for
+// the empty/forced cases it targets the current working directory.
+func refreshIndexBeforeReport(store *indexer.Store, root string, computeHashes bool, except []string, force bool) (string, error) {
+	need := force || root != ""
+	if !need {
+		empty, err := store.IsEmpty()
+		if err != nil {
+			return "", err
+		}
+		need = empty
+	}
+	if !need {
+		return "", nil
+	}
+
+	target := root
+	if target == "" {
+		if abs, aerr := filepath.Abs("."); aerr == nil {
+			target = abs
+		} else {
+			target = "."
+		}
+	}
+
+	if _, err := indexWithProgress(store, target, computeHashes, except); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
 func newIndexCmd() *cobra.Command {
 	var (
 		computeHashes bool
 		clearIndex    bool
+		except        []string
 	)
 
 	cmd := &cobra.Command{
@@ -42,11 +80,14 @@ func newIndexCmd() *cobra.Command {
 			if len(args) > 0 {
 				path = args[0]
 			}
+			if abs, err := filepath.Abs(filepath.Clean(path)); err == nil {
+				path = abs
+			}
 
 			fmt.Printf("\x1b[38;5;254mIndexing directory \x1b[38;5;220m%s\x1b[0m...\n", path)
 			start := time.Now()
 
-			count, err := indexWithProgress(store, path, computeHashes)
+			count, err := indexWithProgress(store, path, computeHashes, except)
 			if err != nil {
 				return err
 			}
@@ -58,6 +99,8 @@ func newIndexCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&computeHashes, "hash", false, "Compute cryptographic SHA256 hashes during indexing")
 	cmd.Flags().BoolVar(&clearIndex, "clear", false, "Clear and truncate cached file index records")
+	cmd.Flags().StringSliceVar(&except, "except", nil,
+		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
 	return cmd
 }
 
@@ -140,7 +183,12 @@ func newCleanCmd() *cobra.Command {
 }
 
 func newStatsCmd() *cobra.Command {
-	return &cobra.Command{
+	var (
+		except  []string
+		refresh bool
+	)
+
+	cmd := &cobra.Command{
 		Use:   "stats [path]",
 		Short: "Display storage and category statistics from local index",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -153,7 +201,17 @@ func newStatsCmd() *cobra.Command {
 			root := ""
 			if len(args) > 0 {
 				root = args[0]
+				if abs, err := filepath.Abs(filepath.Clean(root)); err == nil {
+					root = abs
+				}
 			}
+
+			// Auto-refresh a scoped path; re-populate an empty cache from the CWD;
+			// --refresh forces a CWD re-scan+purge for bare runs.
+			if _, err := refreshIndexBeforeReport(store, root, false, except, refresh); err != nil {
+				return err
+			}
+
 			summary, err := store.GetStats(root)
 			if err != nil {
 				return err
@@ -178,7 +236,7 @@ func newStatsCmd() *cobra.Command {
 					if i >= 5 {
 						break
 					}
-					fmt.Printf("    %d. %s \x1b[38;5;246m(%s)\x1b[0m\n", i+1, f.RelPath, formatFileSize(f.Size))
+					fmt.Printf("    %d. %s \x1b[38;5;246m(%s)\x1b[0m\n", i+1, f.Path, formatFileSize(f.Size))
 				}
 			}
 
@@ -186,6 +244,12 @@ func newStatsCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringSliceVar(&except, "except", nil,
+		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
+	cmd.Flags().BoolVar(&refresh, "refresh", false,
+		"Force a fresh re-index (with stale/excluded-row purge) before reporting")
+	return cmd
 }
 
 func newDuplicatesCmd() *cobra.Command {
@@ -211,7 +275,9 @@ func newDuplicatesCmd() *cobra.Command {
 				if abs, err := filepath.Abs(filepath.Clean(root)); err == nil {
 					root = abs
 				}
-				_, _ = indexWithProgress(store, root, true, except)
+				if _, err := indexWithProgress(store, root, true, except); err != nil {
+					return err
+				}
 			}
 
 			groups, err := store.FindDuplicates(root)
@@ -252,7 +318,12 @@ func newDuplicatesCmd() *cobra.Command {
 }
 
 func newAnalyzeCmd() *cobra.Command {
-	return &cobra.Command{
+	var (
+		except  []string
+		refresh bool
+	)
+
+	cmd := &cobra.Command{
 		Use:   "analyze [path]",
 		Short: "Analyze indexed filesystem data and report storage intelligence",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -276,7 +347,13 @@ func newAnalyzeCmd() *cobra.Command {
 				if abs, err := filepath.Abs(filepath.Clean(root)); err == nil {
 					root = abs
 				}
-				_, _ = indexWithProgress(store, root, true)
+			}
+
+			// Auto-refresh a scoped path; re-populate an empty cache from the CWD
+			// (e.g. right after `chest clean`); --refresh forces a CWD re-scan+purge
+			// for bare runs.
+			if _, err := refreshIndexBeforeReport(store, root, true, except, refresh); err != nil {
+				return err
 			}
 
 			// Analyze() is not instant: computing stats, scanning the duplicate
@@ -308,7 +385,7 @@ func newAnalyzeCmd() *cobra.Command {
 					if i >= 3 {
 						break
 					}
-					fmt.Printf("    • %s (%s)\n", f.Name, formatFileSize(f.Size))
+					fmt.Printf("    • %s (%s)\n", f.Path, formatFileSize(f.Size))
 				}
 			}
 
@@ -318,4 +395,10 @@ func newAnalyzeCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringSliceVar(&except, "except", nil,
+		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
+	cmd.Flags().BoolVar(&refresh, "refresh", false,
+		"Force a fresh re-index (with stale/excluded-row purge) before reporting")
+	return cmd
 }

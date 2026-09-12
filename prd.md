@@ -591,7 +591,7 @@ CHEST should provide both short and long forms.
 | `-t`                 | `--type`   | Sort by file type        |
 | `-f`                 | `--format` | Sort by extension/format |
 | `-s`                 | `--size`   | Sort by file size        |
-| `-d`                 | `--date`   | Sort by date             |
+| `-d`                 | `--date`   | Sort by date; defaults to modification year unless `--date-source` is set |
 
 Examples:
 
@@ -614,6 +614,10 @@ chest sort -s
 chest sort --size
 
 ```
+
+Date sorting defaults to modification year for backward compatibility. For media files with embedded dates, use `--date-source auto` to prefer EXIF/QuickTime taken/creation dates and fall back to modification time when metadata is missing. Use `--date-granularity year|month|day` to control folder depth.
+
+Custom rules can use date placeholders from the selected source: `{date}`, `{year}`, `{month}`, and `{day}`. Example: `chest sort --rule "type=image -> Photos/{date}" --date-source auto --date-granularity day`.
 
 Multiple criteria may be combined:
 

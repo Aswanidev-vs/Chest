@@ -11,6 +11,7 @@ const (
 	FieldName      TargetField = "name"
 	FieldDate      TargetField = "date"
 	FieldModTime   TargetField = "mod_time"
+	FieldTakenDate TargetField = "taken_date"
 	FieldMIME      TargetField = "mime"
 )
 

@@ -166,7 +166,7 @@
 
           <!-- Section: Architecture -->
           <h2 id="architecture"><i data-lucide="layers"></i> Architecture & Guarantees</h2>
-          <p>CHEST is architected as four decoupled subsystems:</p>
+          <p>CHEST is architected as five decoupled subsystems:</p>
 
           <table class="flag-table">
             <thead>
@@ -196,6 +196,11 @@
                 <td><strong style="color: #ffffff;">Storage Index</strong></td>
                 <td>Embedded Pure-Go SQLite</td>
                 <td>Metadata caching, duplicate hashing, and storage intelligence at <code>~/.chest/index.db</code>.</td>
+              </tr>
+              <tr>
+                <td><strong style="color: #ffffff;">Metadata</strong></td>
+                <td>Signature + Extractor Registry</td>
+                <td>Content-signature format detection (magic bytes first, extension fallback) and embedded metadata extraction — EXIF, QuickTime, PDF, audio tags, and ZIP-based OOXML/ODF/EPUB properties — via an open registry that supports custom formats.</td>
               </tr>
             </tbody>
           </table>
@@ -228,7 +233,7 @@
               <tr>
                 <td><span class="flag-badge">--rule</span></td>
                 <td>string</td>
-                <td>Custom predicate rule: <code>"type=image && size>10MB -> HighRes/"</code>.</td>
+                <td>Custom predicate rule: <code>"type=image && size>10MB -> HighRes/"</code>. Rules can match on <code>extension=</code> (filename extension) or <code>format=</code> (content-detected format — routes a file even if its extension is missing or renamed). Custom binary formats can be registered programmatically via the metadata extractor registry.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">-y, --yes</span></td>
@@ -243,7 +248,22 @@
               <tr>
                 <td><span class="flag-badge">-d, --date</span></td>
                 <td>boolean</td>
-                <td>Group files into folders named for each file's modification year, such as <code>2024/</code>, <code>2025/</code>, and <code>2026/</code>.</td>
+                <td>Group files by date. Default source is modification time and default granularity is year, e.g. <code>2024/</code>, <code>2025/</code>, and <code>2026/</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--date-source</span></td>
+                <td>string</td>
+                <td>Date source for <code>--date</code> and date placeholders: <code>modified</code> (default), <code>auto</code> (embedded media date with modification-time fallback), or <code>taken</code> (embedded date only). Embedded dates are extracted from EXIF <code>DateTimeOriginal</code>/<code>CreateDate</code>, QuickTime <code>mvhd</code>, PDF Info dictionary, ID3/Vorbis/FLAC/OGG tags, RIFF-INFO chunks, and ZIP-based OOXML/ODF/EPUB core properties.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--date-granularity</span></td>
+                <td>string</td>
+                <td>Date folder granularity: <code>year</code> (default), <code>month</code> (<code>YYYY/MM</code>), or <code>day</code> (<code>YYYY/MM/DD</code>).</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-f, --format</span></td>
+                <td>boolean</td>
+                <td>Group files into folders by their <strong>content-detected format</strong> (e.g. <code>MP4/</code>, <code>MP3/</code>, <code>PNG/</code>). Detection reads the file's magic-byte signature first and falls back to its extension, so a renamed or extension-less file is still classified correctly. Custom formats registered programmatically (e.g. <code>.gocut</code>) participate too. Use <code>--into</code> to wrap the folders (e.g. <code>--format --into out</code> → <code>out/MP4/</code>).</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--allow-system</span></td>
@@ -403,23 +423,24 @@
           </table>
 
           <h3 id="cmd-index">chest index & clean</h3>
-          <p>Index file paths and hashes into SQLite for fast duplicate discovery. Indexing is <em>incremental</em> (unchanged files are skipped), runs in parallel across CPU cores, and shows a live progress bar:</p>
+          <p>Index file paths and hashes into SQLite for fast duplicate discovery. Indexing is <em>incremental</em> (unchanged files are skipped), runs in parallel across CPU cores, shows a live progress bar, and re-indexing <em>prunes</em> rows for files that were deleted/moved or are now covered by <code>--except</code>. The <code>--except</code> flag is available on <code>index</code>, <code>stats</code>, <code>analyze</code>, and <code>duplicates</code>:</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">index</span> <span class="t-path">~/Documents</span> <span class="t-flag">--hash</span>    <span class="t-comment"># Incremental parallel SHA-256 with progress bar</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">clean</span>                       <span class="t-comment"># Prune deleted files from local index</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">index</span> <span class="t-path">~/Projects</span> <span class="t-flag">--except</span> node_modules,venv <span class="t-comment"># Skip noisy dirs on index</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">clean</span>                       <span class="t-comment"># Empty cached index (re-index to rebuild)</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">clean</span> <span class="t-flag">--all</span>                 <span class="t-comment"># Reset index database completely</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">clean</span> <span class="t-flag">--history</span>           <span class="t-comment"># Also wipe undo history (~/.chest/history.json)</span></code></pre>
           </div>
 
           <h3 id="cmd-intel">stats, duplicates & analyze</h3>
-          <p>Storage intelligence commands — duplicate detection re-verifies hashes and supports <code>--except</code> to prune noisy directories:</p>
+          <p>Storage intelligence commands. A scoped run always refreshes its folder first; a bare run re-populates an empty cache from the current directory instead of reporting all zeros. <code>--except</code> prunes noisy directories (and drops their previously-indexed rows), and <code>--refresh</code> forces a fresh re-scan with stale-row purge. Largest files are reported with absolute paths:</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
-            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-path">~/Projects</span>            <span class="t-comment"># Category and size breakdown</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Downloads</span>      <span class="t-comment"># Locate byte-for-byte duplicates</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Projects</span> <span class="t-flag">--except</span> node_modules,venv <span class="t-comment"># Skip noisy dirs</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">analyze</span> <span class="t-path">~/Documents</span>         <span class="t-comment"># Find zero-byte files and stale items (&gt;180 days); footer shows total run time</span></code></pre>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-path">~/Projects</span> <span class="t-flag">--except</span> node_modules <span class="t-comment"># Auto-refresh scope + category/size breakdown</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-flag">--refresh</span>          <span class="t-comment"># Force a fresh re-scan + purge of the current dir</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Downloads</span>  <span class="t-comment"># Locate byte-for-byte duplicates</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">analyze</span> <span class="t-path">~/Documents</span> <span class="t-flag">--refresh</span> <span class="t-comment"># Force fresh audit (zero-byte + stale &gt;180d)</span></code></pre>
           </div>
 
           <h3 id="cmd-speedtest">chest speedtest</h3>

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -185,6 +186,177 @@ func TestCountFiles(t *testing.T) {
 	if indexed != n {
 		t.Errorf("CountFiles (%d) disagrees with IndexDirectory (%d)", n, indexed)
 	}
+}
+
+func countRows(t *testing.T, store *Store, root string) int {
+	t.Helper()
+	scope, args := pathScope(root)
+	query := "SELECT COUNT(*) FROM files"
+	if scope != "" {
+		query += " WHERE " + scope
+	}
+	var n int
+	if err := store.db.QueryRow(query, args...).Scan(&n); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	return n
+}
+
+func TestIndexDirectoryPurgesDeletedFiles(t *testing.T) {
+	store := newTestStore(t)
+	root := t.TempDir()
+
+	keep := filepath.Join(root, "keep.txt")
+	gone := filepath.Join(root, "gone.txt")
+	require.NoError(t, os.WriteFile(keep, []byte("keep"), 0644))
+	require.NoError(t, os.WriteFile(gone, []byte("gone"), 0644))
+
+	_, err := store.IndexDirectory(root, false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, countRows(t, store, root))
+
+	// Delete one file and re-index: its stale row must be removed.
+	require.NoError(t, os.Remove(gone))
+	_, err = store.IndexDirectory(root, false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, countRows(t, store, root), "deleted file's row should be purged")
+}
+
+func TestIndexDirectoryPurgesExcludedRows(t *testing.T) {
+	store := newTestStore(t)
+	root := t.TempDir()
+
+	// First index everything, including a file that will later be excluded.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "main.go"), []byte("go"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "notes.txt"), []byte("txt"), 0644))
+	_, err := store.IndexDirectory(root, false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, countRows(t, store, root))
+
+	// Re-index excluding *.txt: the previously-indexed txt row must vanish.
+	_, err = store.IndexDirectory(root, false, nil, []string{"*.txt"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, countRows(t, store, root), "excluded file's stale row should be purged")
+
+	var remain string
+	require.NoError(t, store.db.QueryRow(
+		"SELECT name FROM files WHERE name = 'main.go'").Scan(&remain))
+	assert.Equal(t, "main.go", remain)
+}
+
+func TestIsEmpty(t *testing.T) {
+	store := newTestStore(t)
+	empty, err := store.IsEmpty()
+	require.NoError(t, err)
+	assert.True(t, empty, "fresh store should be empty")
+
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0644))
+	_, err = store.IndexDirectory(root, false, nil)
+	require.NoError(t, err)
+
+	empty, err = store.IsEmpty()
+	require.NoError(t, err)
+	assert.False(t, empty, "store with indexed files should not be empty")
+}
+
+func TestPathWithinRootCaseSensitivity(t *testing.T) {
+	// Same-casing must always be inside the root, on every platform.
+	root := "/tmp/Projects"
+	if !pathWithinRoot(root, "/tmp/Projects/file.txt") {
+		t.Fatal("same-casing child should be within root")
+	}
+	if !pathWithinRoot(root, "/tmp/Projects") {
+		t.Fatal("root itself should be within root")
+	}
+
+	// Differently-cased spelling: must only match on case-insensitive platforms.
+	got := pathWithinRoot(root, "/tmp/projects/file.txt")
+	if caseInsensitiveFS() != got {
+		t.Errorf("case-insensitive match mismatch: platform=%q want=%v got=%v",
+			runtime.GOOS, caseInsensitiveFS(), got)
+	}
+
+	// A sibling prefix must never match, regardless of case.
+	if pathWithinRoot("/tmp/Projects", "/tmp/ProjectsExtra/x.txt") {
+		t.Fatal("sibling-prefix dir leaked into root scope")
+	}
+	if caseInsensitiveFS() && pathWithinRoot("/tmp/Projects", "/tmp/ProjectX/x.txt") {
+		t.Fatal("sibling different-case dir leaked into root scope")
+	}
+}
+
+func TestPathScopeCaseSensitivity(t *testing.T) {
+	ci := caseInsensitiveFS()
+	sql, args := pathScope("/tmp/Projects")
+	usesFold := strings.Contains(sql, "LOWER(")
+	if ci != usesFold {
+		t.Errorf("pathScope folding mismatch: platform=%q usesFold=%v want=%v", runtime.GOOS, usesFold, ci)
+	}
+	// One of the args must be the lowercased root when folding is active.
+	if ci {
+		want := strings.ToLower(filepath.Clean("/tmp/Projects"))
+		matched := false
+		for _, a := range args {
+			if s, ok := a.(string); ok && s == want {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Errorf("pathScope folding did not pass a lowercased root arg: %v", args)
+		}
+	}
+}
+
+func TestGetStatsCaseInsensitiveScope(t *testing.T) {
+	if !caseInsensitiveFS() {
+		t.Skip("case-insensitive filesystem behavior only")
+	}
+	store := newTestStore(t)
+	root := filepath.Join(t.TempDir(), "Data") // exact on-disk casing
+	require.NoError(t, os.MkdirAll(root, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("aaa"), 0644))
+	_, err := store.IndexDirectory(root, false, nil)
+	require.NoError(t, err)
+
+	// Query with a different casing of the same directory.
+	alt := filepath.Join(filepath.Dir(root), "data")
+	exact, err := store.GetStats(root)
+	require.NoError(t, err)
+	folded, err := store.GetStats(alt)
+	require.NoError(t, err)
+	assert.Equal(t, exact.TotalFiles, folded.TotalFiles,
+		"differently-cased scope should return the same file count")
+	assert.Equal(t, exact.TotalSize, folded.TotalSize,
+		"differently-cased scope should return the same total size")
+}
+
+func TestMigrateRelativePaths(t *testing.T) {
+	store := newTestStore(t)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	// Simulate a legacy `chest index .` row with a relative path.
+	_, err = store.db.Exec(
+		"INSERT INTO files (path, rel_path, name, extension, size, mod_time, category, hash) VALUES (?, ?, 'foo.txt', 'txt', 3, 0, 'OTHER', '')",
+		"virtual/sub/foo.txt", "virtual/sub/foo.txt")
+	require.NoError(t, err)
+
+	// Force the migration to run in isolation (OpenOrCreate already stamped the
+	// marker on the freshly created empty store).
+	_, err = store.db.Exec("DELETE FROM meta WHERE key = 'paths_absolute_migrated'")
+	require.NoError(t, err)
+	require.NoError(t, store.migrateRelativePaths())
+
+	var abs, rel string
+	require.NoError(t, store.db.QueryRow(
+		"SELECT path, rel_path FROM files WHERE name = 'foo.txt'").Scan(&abs, &rel))
+	assert.True(t, filepath.IsAbs(abs), "legacy relative path should be made absolute")
+	assert.Equal(t, filepath.Join(cwd, "virtual", "sub", "foo.txt"), abs)
+	assert.Equal(t, filepath.Join("virtual", "sub", "foo.txt"), rel)
+
+	// Marker is set, so a second invocation must be a no-op and idempotent.
+	assert.NoError(t, store.migrateRelativePaths())
 }
 
 func TestIndexIncremental(t *testing.T) {

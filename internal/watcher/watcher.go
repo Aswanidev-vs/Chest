@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Aswanidev-vs/chest/internal/history"
+	"github.com/Aswanidev-vs/chest/internal/metadata"
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/Aswanidev-vs/chest/internal/organizer"
 	"github.com/Aswanidev-vs/chest/internal/planner"
@@ -20,13 +21,14 @@ import (
 
 // WatchOptions configures watch mode
 type WatchOptions struct {
-	Directory string
-	Preset    string
-	Rules     []string
-	Name      string
-	Debounce  time.Duration
-	Initial   bool
-	DryRun    bool
+	Directory  string
+	Preset     string
+	Rules      []string
+	Name       string
+	Debounce   time.Duration
+	Initial    bool
+	DryRun     bool
+	DateSource string
 }
 
 // EventKind identifies the type of activity reported to the watch output.
@@ -65,6 +67,9 @@ type Watcher struct {
 func New(opts WatchOptions) (*Watcher, error) {
 	if opts.Debounce <= 0 {
 		opts.Debounce = 500 * time.Millisecond
+	}
+	if opts.DateSource == "" {
+		opts.DateSource = "modified"
 	}
 
 	var activeRules []models.Rule
@@ -161,6 +166,7 @@ func (w *Watcher) Start(ctx context.Context, cb func(ev Event)) error {
 			Recursive:      false, // fsnotify only monitors the top-level directory
 			IncludeHidden:  false,
 			FollowSymlinks: false,
+			ExtractDates:   w.opts.DateSource != "modified",
 		})
 		existing, serr := sc.Scan(targetDir)
 		if serr == nil {
@@ -258,6 +264,21 @@ func (w *Watcher) processFile(filePath string, cb func(ev Event)) {
 		Size:      info.Size(),
 		ModTime:   info.ModTime(),
 		IsDir:     false,
+	}
+	if meta, err := metadata.Extract(filePath, ext); err == nil {
+		if meta.Format != "" {
+			file.Format = meta.Format
+		}
+		if file.MIMEType == "" {
+			file.MIMEType = meta.MIMEType
+		}
+		if len(meta.Fields) > 0 {
+			file.Metadata = meta.Fields
+		}
+		if w.opts.DateSource != "modified" && !meta.Date.Date.IsZero() {
+			file.TakenDate = &meta.Date.Date
+			file.TakenDateSource = meta.Date.Source
+		}
 	}
 
 	plan, err := w.planner.Plan(w.opts.Directory, []models.File{file})

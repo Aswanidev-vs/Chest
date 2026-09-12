@@ -22,24 +22,26 @@ import (
 )
 
 type sortFlags struct {
-	byType         bool
-	byFormat       bool
-	bySize         bool
-	byDate         bool
-	into           string
-	name           string
-	preset         string
-	dryRun         bool
-	yes            bool
-	recursive      bool
-	verbose        bool
-	quiet          bool
-	exclude        string
-	hidden         bool
-	customRules    []string
-	followSymlinks bool
-	collision      string
-	allowSystem    bool
+	byType          bool
+	byFormat        bool
+	bySize          bool
+	byDate          bool
+	dateSource      string
+	dateGranularity string
+	into            string
+	name            string
+	preset          string
+	dryRun          bool
+	yes             bool
+	recursive       bool
+	verbose         bool
+	quiet           bool
+	exclude         string
+	hidden          bool
+	customRules     []string
+	followSymlinks  bool
+	collision       string
+	allowSystem     bool
 }
 
 func newSortCmd() *cobra.Command {
@@ -100,6 +102,26 @@ func newSortCmd() *cobra.Command {
 			case models.CollisionSkip, models.CollisionRename, models.CollisionReplace, models.CollisionAbort:
 			default:
 				return fmt.Errorf("invalid collision policy '%s'. Valid: skip, rename, replace, abort", f.collision)
+			}
+
+			dateSource := strings.ToLower(f.dateSource)
+			if dateSource == "" {
+				dateSource = "modified"
+			}
+			switch dateSource {
+			case "modified", "auto", "taken":
+			default:
+				return fmt.Errorf("invalid date source '%s'. Valid: modified, auto, taken", f.dateSource)
+			}
+
+			dateGranularity := strings.ToLower(f.dateGranularity)
+			if dateGranularity == "" {
+				dateGranularity = "year"
+			}
+			switch dateGranularity {
+			case "year", "month", "day":
+			default:
+				return fmt.Errorf("invalid date granularity '%s'. Valid: year, month, day", f.dateGranularity)
 			}
 
 			// Assemble rules
@@ -192,9 +214,9 @@ func newSortCmd() *cobra.Command {
 
 			if f.byDate {
 				ruleList = append(ruleList, models.Rule{
-					Name:        "Year",
+					Name:        "Date",
 					Priority:    20,
-					Destination: "{year}",
+					Destination: "{date}",
 				})
 			}
 
@@ -249,6 +271,7 @@ func newSortCmd() *cobra.Command {
 				FollowSymlinks: f.followSymlinks,
 				Exclusions:     exclusions,
 				ClassifyFunc:   classifyFunc,
+				ExtractDates:   dateSource != "modified",
 			})
 
 			if f.verbose {
@@ -312,9 +335,9 @@ func newSortCmd() *cobra.Command {
 
 			var pl *planner.Planner
 			if flat {
-				pl = planner.NewFlat(engine, baseDest, collisionPolicy)
+				pl = planner.NewFlat(engine, baseDest, collisionPolicy, planner.WithDate(dateSource, dateGranularity))
 			} else {
-				pl = planner.New(engine, baseDest, collisionPolicy)
+				pl = planner.New(engine, baseDest, collisionPolicy, planner.WithDate(dateSource, dateGranularity))
 			}
 
 			plan, err := pl.Plan(absTarget, files)
@@ -409,6 +432,8 @@ func newSortCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&f.byFormat, "format", "f", false, "Boolean; group files into folders by their real extension (MP4/, MP3/, PNG/). Take no value")
 	cmd.Flags().BoolVarP(&f.bySize, "size", "s", false, "Sort by file size")
 	cmd.Flags().BoolVarP(&f.byDate, "date", "d", false, "Sort by date")
+	cmd.Flags().StringVar(&f.dateSource, "date-source", "modified", "Date source for --date and date placeholders: modified, auto, taken")
+	cmd.Flags().StringVar(&f.dateGranularity, "date-granularity", "year", "Date folder granularity for --date and date placeholders: year, month, day")
 	cmd.Flags().StringVarP(&f.into, "into", "i", "", "Custom destination folder")
 	cmd.Flags().StringVar(&f.name, "name", "", "Move all matched files flat into this folder inside the target directory (e.g. --name \"Anime\" -> Anime/*.mp4); cannot be combined with --into")
 	cmd.Flags().StringVarP(&f.preset, "preset", "p", "", "Use predefined preset (downloads, media, documents, developer, photos)")

@@ -45,3 +45,53 @@ func TestPlanExpandsYearDestination(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanExpandsDatePlaceholdersFromTakenDate(t *testing.T) {
+	root := t.TempDir()
+	taken := time.Date(2024, 3, 4, 0, 0, 0, 0, time.UTC)
+	modified := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
+	engine := rules.NewEngine([]models.Rule{{
+		Name:        "Date",
+		Priority:    20,
+		Destination: "{date}",
+	}})
+	file := models.File{
+		Name:      "photo.jpg",
+		Path:      filepath.Join(root, "photo.jpg"),
+		ModTime:   modified,
+		TakenDate: &taken,
+	}
+
+	plan, err := New(engine, "", models.CollisionSkip, WithDate("auto", "day")).Plan(root, []models.File{file})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(plan.Operations) != 1 {
+		t.Fatalf("expected 1 operation, got %d", len(plan.Operations))
+	}
+	want := filepath.Join(root, "2024", "03", "04", "photo.jpg")
+	if plan.Operations[0].Destination != want {
+		t.Fatalf("Destination = %q, want %q", plan.Operations[0].Destination, want)
+	}
+}
+
+func TestPlanTakenDateSourceSkipsMissingMetadata(t *testing.T) {
+	root := t.TempDir()
+	engine := rules.NewEngine([]models.Rule{{
+		Name:        "Date",
+		Priority:    20,
+		Destination: "{date}",
+	}})
+	file := models.File{Name: "photo.jpg", Path: filepath.Join(root, "photo.jpg"), ModTime: time.Now()}
+
+	plan, err := New(engine, "", models.CollisionSkip, WithDate("taken", "month")).Plan(root, []models.File{file})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(plan.Operations) != 0 {
+		t.Fatalf("expected no operations, got %d", len(plan.Operations))
+	}
+	if plan.SkippedFiles != 1 {
+		t.Fatalf("SkippedFiles = %d, want 1", plan.SkippedFiles)
+	}
+}

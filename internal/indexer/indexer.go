@@ -115,13 +115,27 @@ func OpenOrCreate(customPath ...string) (*Store, error) {
 		reason TEXT,
 		FOREIGN KEY(entry_id) REFERENCES history_entries(id)
 	);
+
+	CREATE TABLE IF NOT EXISTS meta (
+		key TEXT PRIMARY KEY,
+		value TEXT
+	);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed creating schema: %w", err)
 	}
 
-	return &Store{db: db, dbPath: dbPath}, nil
+	s := &Store{db: db, dbPath: dbPath}
+	// One-time normalization of legacy relative `path` values (from old
+	// `chest index .` runs that stored paths like "sub/foo.txt" instead of
+	// absolute paths) so report scoping and stale-row purging behave
+	// consistently. Runs at most once per store (guarded by a meta marker).
+	if err := s.migrateRelativePaths(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed normalizing legacy paths: %w", err)
+	}
+	return s, nil
 }
 
 // Store wraps SQLite index database
@@ -145,6 +159,83 @@ func (s *Store) ClearIndex() error {
 func (s *Store) DeleteDB() error {
 	_ = s.db.Close()
 	return os.Remove(s.dbPath)
+}
+
+// IsEmpty reports whether the cached index contains zero file records. Report
+// commands use this to detect an empty cache (e.g. right after `chest clean`)
+// and transparently re-populate instead of showing all-zero results.
+func (s *Store) IsEmpty() (bool, error) {
+	var n int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM files").Scan(&n); err != nil {
+		return false, err
+	}
+	return n == 0, nil
+}
+
+// migrateRelativePaths is a one-time upgrade that rewrites legacy relative
+// `path` values — produced by old `chest index .` runs that stored paths like
+// "sub/foo.txt" instead of absolute paths — to absolute paths rooted at the
+// current working directory. It runs at most once per store: after the first
+// successful pass a meta marker is written so subsequent opens skip the scan.
+func (s *Store) migrateRelativePaths() error {
+	var done string
+	if err := s.db.QueryRow("SELECT value FROM meta WHERE key = 'paths_absolute_migrated'").Scan(&done); err == nil && done == "1" {
+		return nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
+
+	rows, err := s.db.Query("SELECT path, rel_path FROM files")
+	if err != nil {
+		return err
+	}
+	type legacy struct{ path, rel string }
+	var pending []legacy
+	for rows.Next() {
+		var p legacy
+		if err := rows.Scan(&p.path, &p.rel); err != nil {
+			rows.Close()
+			return err
+		}
+		if !filepath.IsAbs(p.path) {
+			pending = append(pending, p)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	upd, err := tx.Prepare("UPDATE files SET path = ?, rel_path = ? WHERE path = ?")
+	if err != nil {
+		return err
+	}
+	for _, p := range pending {
+		abs := filepath.Join(cwd, filepath.Clean(p.path))
+		rel := p.rel
+		if r, rerr := filepath.Rel(cwd, abs); rerr == nil {
+			rel = r
+		}
+		if _, err := upd.Exec(abs, rel, p.path); err != nil {
+			upd.Close()
+			return err
+		}
+	}
+	upd.Close()
+
+	if _, err := tx.Exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('paths_absolute_migrated', '1')"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // RecordHistory saves operation run into SQLite
@@ -252,6 +343,12 @@ func (s *Store) MarkHistoryUndone(id int) error {
 // matched against each entry name and its path relative to root.
 func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(current int), exclusions ...[]string) (int, error) {
 	root = filepath.Clean(root)
+	if abs, aerr := filepath.Abs(root); aerr == nil {
+		// Store absolute paths so report scoping and stale-row purging are
+		// consistent regardless of how the user spelled the root (".", "./x",
+		// or "/abs/x"). duplicates/analyze already canonicalize before calling.
+		root = abs
+	}
 	exclSet := exclSetFromArgs(exclusions...)
 
 	// Snapshot the current index so unchanged files can be skipped incrementally
@@ -287,6 +384,8 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 	var (
 		processedCount int64 // files passed to the walker (drives progress)
 		indexedCount   int64 // rows actually inserted/updated
+		seen           = make(map[string]struct{})
+		seenMu         = &sync.Mutex{}
 	)
 
 	// A single writer goroutine drains rows and flushes them in batches. This
@@ -354,6 +453,9 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 		// a hash (or don't need one), keep the existing row untouched.
 		if meta, ok := existing[path]; ok && meta.size == size && meta.modUnix == modUnix {
 			if !computeHashes || meta.hash != "" {
+				seenMu.Lock()
+				seen[path] = struct{}{}
+				seenMu.Unlock()
 				return nil
 			}
 		}
@@ -369,6 +471,10 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 			}
 		}
 
+		seenMu.Lock()
+		seen[path] = struct{}{}
+		seenMu.Unlock()
+
 		rowsCh <- row{path, rel, name, ext, cat, size, modUnix, hashVal}
 		return nil
 	}
@@ -380,6 +486,25 @@ func (s *Store) IndexDirectory(root string, computeHashes bool, progress func(cu
 	}
 	close(rowsCh)
 	<-writerDone
+
+	// Purge stale rows: paths previously indexed under this root that were
+	// neither seen on disk nor re-added this run — i.e. files that were
+	// deleted/moved, or that are now covered by the current --except
+	// exclusions. INSERT OR REPLACE never removes rows, so without this the
+	// cache would keep describing files that no longer exist.
+	del, derr := tx.Prepare("DELETE FROM files WHERE path = ?")
+	if derr == nil {
+		for p := range existing {
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			if !pathWithinRoot(root, p) {
+				continue
+			}
+			_, _ = del.Exec(p)
+		}
+		_ = del.Close()
+	}
 
 	if err := tx.Commit(); err != nil {
 		return 0, err
@@ -498,6 +623,39 @@ func normalizeRoot(root string) string {
 	return filepath.Clean(root)
 }
 
+// caseInsensitiveFS reports whether the OS treats filesystem paths as
+// case-insensitive (macOS and Windows). CHEST only folds path case for scoped
+// lookup and stale-row purging on these platforms; on case-sensitive
+// filesystems such as Linux two directories that differ only by case are
+// genuinely distinct and must never be conflated.
+func caseInsensitiveFS() bool {
+	return runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+}
+
+// pathWithinRoot reports whether path is root itself or sits directly under it,
+// mirroring the trailing-separator prefix rule used by pathScope so sibling
+// directories can never be matched. On case-insensitive filesystems the check
+// ignores case so a differently-cased spelling of the root still purges/scopes
+// the same indexed rows.
+func pathWithinRoot(root, path string) bool {
+	if root == "" {
+		return false
+	}
+	r := filepath.Clean(root)
+	p := filepath.Clean(path)
+	if p == r {
+		return true
+	}
+	pref := r + string(filepath.Separator)
+	if caseInsensitiveFS() {
+		if strings.EqualFold(p, r) {
+			return true
+		}
+		return strings.HasPrefix(strings.ToLower(p), strings.ToLower(pref))
+	}
+	return strings.HasPrefix(p, pref)
+}
+
 // pathScope builds a `path` prefix predicate (and its params) that narrows a
 // query to a single indexed folder subtree. The trailing separator is included in
 // the matched prefix, so a sibling folder (e.g. `root2` or `root-two`) can never
@@ -509,7 +667,15 @@ func pathScope(root string) (string, []any) {
 	}
 	sep := string(filepath.Separator)
 	pref := root + sep
-	// Match the folder in question alone plus everything directly under it.
+	if caseInsensitiveFS() {
+		// Fold both sides so a user spelling the directory with different casing
+		// than on disk still hits the indexed rows (macOS/Windows are
+		// case-insensitive filesystems by default).
+		return "(LOWER(path) = ? OR (LOWER(substr(path, 1, ?)) = ? AND length(path) > ?))",
+			[]any{strings.ToLower(root), len(pref), strings.ToLower(pref), len(pref)}
+	}
+	// Linux is case-sensitive: match the folder in question alone plus
+	// everything directly under it, case-exactly.
 	return "(path = ? OR (substr(path, 1, ?) = ? AND length(path) > ?))",
 		[]any{root, len(pref), pref, len(pref)}
 }
@@ -821,7 +987,7 @@ func (s *Store) FindDuplicatesProgress(root string, pctStart, pctEnd int, progre
 		}
 		n := len(hashInfos)
 		if n > 0 {
-			emit(lerp(int(700 + int64(300) * int64(gi+1) / int64(n))))
+			emit(lerp(int(700 + int64(300)*int64(gi+1)/int64(n))))
 		}
 	}
 	emit(lerp(1000))
