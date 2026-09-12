@@ -623,9 +623,20 @@ func normalizeRoot(root string) string {
 	return filepath.Clean(root)
 }
 
+// caseInsensitiveFS reports whether the OS treats filesystem paths as
+// case-insensitive (macOS and Windows). CHEST only folds path case for scoped
+// lookup and stale-row purging on these platforms; on case-sensitive
+// filesystems such as Linux two directories that differ only by case are
+// genuinely distinct and must never be conflated.
+func caseInsensitiveFS() bool {
+	return runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+}
+
 // pathWithinRoot reports whether path is root itself or sits directly under it,
 // mirroring the trailing-separator prefix rule used by pathScope so sibling
-// directories can never be matched.
+// directories can never be matched. On case-insensitive filesystems the check
+// ignores case so a differently-cased spelling of the root still purges/scopes
+// the same indexed rows.
 func pathWithinRoot(root, path string) bool {
 	if root == "" {
 		return false
@@ -636,6 +647,12 @@ func pathWithinRoot(root, path string) bool {
 		return true
 	}
 	pref := r + string(filepath.Separator)
+	if caseInsensitiveFS() {
+		if strings.EqualFold(p, r) {
+			return true
+		}
+		return strings.HasPrefix(strings.ToLower(p), strings.ToLower(pref))
+	}
 	return strings.HasPrefix(p, pref)
 }
 
@@ -650,7 +667,15 @@ func pathScope(root string) (string, []any) {
 	}
 	sep := string(filepath.Separator)
 	pref := root + sep
-	// Match the folder in question alone plus everything directly under it.
+	if caseInsensitiveFS() {
+		// Fold both sides so a user spelling the directory with different casing
+		// than on disk still hits the indexed rows (macOS/Windows are
+		// case-insensitive filesystems by default).
+		return "(LOWER(path) = ? OR (LOWER(substr(path, 1, ?)) = ? AND length(path) > ?))",
+			[]any{strings.ToLower(root), len(pref), strings.ToLower(pref), len(pref)}
+	}
+	// Linux is case-sensitive: match the folder in question alone plus
+	// everything directly under it, case-exactly.
 	return "(path = ? OR (substr(path, 1, ?) = ? AND length(path) > ?))",
 		[]any{root, len(pref), pref, len(pref)}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -257,6 +258,77 @@ func TestIsEmpty(t *testing.T) {
 	empty, err = store.IsEmpty()
 	require.NoError(t, err)
 	assert.False(t, empty, "store with indexed files should not be empty")
+}
+
+func TestPathWithinRootCaseSensitivity(t *testing.T) {
+	// Same-casing must always be inside the root, on every platform.
+	root := "/tmp/Projects"
+	if !pathWithinRoot(root, "/tmp/Projects/file.txt") {
+		t.Fatal("same-casing child should be within root")
+	}
+	if !pathWithinRoot(root, "/tmp/Projects") {
+		t.Fatal("root itself should be within root")
+	}
+
+	// Differently-cased spelling: must only match on case-insensitive platforms.
+	got := pathWithinRoot(root, "/tmp/projects/file.txt")
+	if caseInsensitiveFS() != got {
+		t.Errorf("case-insensitive match mismatch: platform=%q want=%v got=%v",
+			runtime.GOOS, caseInsensitiveFS(), got)
+	}
+
+	// A sibling prefix must never match, regardless of case.
+	if pathWithinRoot("/tmp/Projects", "/tmp/ProjectsExtra/x.txt") {
+		t.Fatal("sibling-prefix dir leaked into root scope")
+	}
+	if caseInsensitiveFS() && pathWithinRoot("/tmp/Projects", "/tmp/ProjectX/x.txt") {
+		t.Fatal("sibling different-case dir leaked into root scope")
+	}
+}
+
+func TestPathScopeCaseSensitivity(t *testing.T) {
+	ci := caseInsensitiveFS()
+	sql, args := pathScope("/tmp/Projects")
+	usesFold := strings.Contains(sql, "LOWER(")
+	if ci != usesFold {
+		t.Errorf("pathScope folding mismatch: platform=%q usesFold=%v want=%v", runtime.GOOS, usesFold, ci)
+	}
+	// One of the args must be the lowercased root when folding is active.
+	if ci {
+		want := strings.ToLower(filepath.Clean("/tmp/Projects"))
+		matched := false
+		for _, a := range args {
+			if s, ok := a.(string); ok && s == want {
+				matched = true
+			}
+		}
+		if !matched {
+			t.Errorf("pathScope folding did not pass a lowercased root arg: %v", args)
+		}
+	}
+}
+
+func TestGetStatsCaseInsensitiveScope(t *testing.T) {
+	if !caseInsensitiveFS() {
+		t.Skip("case-insensitive filesystem behavior only")
+	}
+	store := newTestStore(t)
+	root := filepath.Join(t.TempDir(), "Data") // exact on-disk casing
+	require.NoError(t, os.MkdirAll(root, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("aaa"), 0644))
+	_, err := store.IndexDirectory(root, false, nil)
+	require.NoError(t, err)
+
+	// Query with a different casing of the same directory.
+	alt := filepath.Join(filepath.Dir(root), "data")
+	exact, err := store.GetStats(root)
+	require.NoError(t, err)
+	folded, err := store.GetStats(alt)
+	require.NoError(t, err)
+	assert.Equal(t, exact.TotalFiles, folded.TotalFiles,
+		"differently-cased scope should return the same file count")
+	assert.Equal(t, exact.TotalSize, folded.TotalSize,
+		"differently-cased scope should return the same total size")
 }
 
 func TestMigrateRelativePaths(t *testing.T) {
