@@ -106,17 +106,23 @@ func evaluateCondition(cond models.Condition, file models.File) (bool, string) {
 	switch cond.Field {
 	case models.FieldExtension, models.FieldFormat:
 		val := strings.ToLower(strings.TrimPrefix(cond.Value, "."))
+		subject := file.Extension
+		label := "extension"
+		if cond.Field == models.FieldFormat {
+			subject = file.Format
+			label = "format"
+		}
 		matched := false
 		switch cond.Operator {
 		case models.OpEqual:
-			matched = strings.EqualFold(file.Extension, val)
+			matched = strings.EqualFold(subject, val)
 		case models.OpNotEqual:
-			matched = !strings.EqualFold(file.Extension, val)
+			matched = !strings.EqualFold(subject, val)
 		case models.OpGlob:
-			m, _ := filepath.Match(val, file.Extension)
+			m, _ := filepath.Match(val, subject)
 			matched = m
 		}
-		return matched, fmt.Sprintf("extension %s %s", cond.Operator, cond.Value)
+		return matched, fmt.Sprintf("%s %s %s", label, cond.Operator, cond.Value)
 
 	case models.FieldType:
 		matched := false
@@ -173,25 +179,13 @@ func evaluateCondition(cond models.Condition, file models.File) (bool, string) {
 		return matched, fmt.Sprintf("name %s %s", cond.Operator, cond.Value)
 
 	case models.FieldDate, models.FieldModTime:
-		t, err := time.Parse("2006-01-02", cond.Value)
-		if err != nil {
-			t, err = time.Parse(time.RFC3339, cond.Value)
-		}
-		if err != nil {
+		return evaluateDateCondition(cond, file.ModTime)
+
+	case models.FieldTakenDate:
+		if file.TakenDate == nil {
 			return false, ""
 		}
-		matched := false
-		switch cond.Operator {
-		case models.OpLessThan:
-			matched = file.ModTime.Before(t)
-		case models.OpGreaterThan:
-			matched = file.ModTime.After(t)
-		case models.OpLessEq:
-			matched = file.ModTime.Before(t) || file.ModTime.Equal(t)
-		case models.OpGreaterEq:
-			matched = file.ModTime.After(t) || file.ModTime.Equal(t)
-		}
-		return matched, fmt.Sprintf("date %s %s", cond.Operator, cond.Value)
+		return evaluateDateCondition(cond, *file.TakenDate)
 
 	case models.FieldMIME:
 		matched := false
@@ -209,6 +203,77 @@ func evaluateCondition(cond models.Condition, file models.File) (bool, string) {
 	}
 
 	return false, ""
+}
+
+func evaluateDateCondition(cond models.Condition, fileDate time.Time) (bool, string) {
+	start, end, ok := parseDateRange(cond.Value)
+	if !ok {
+		return false, ""
+	}
+
+	matched := false
+	switch cond.Operator {
+	case models.OpEqual:
+		if end != nil {
+			matched = !fileDate.Before(start) && fileDate.Before(*end)
+		} else {
+			matched = fileDate.Equal(start)
+		}
+	case models.OpNotEqual:
+		if end != nil {
+			matched = fileDate.Before(start) || !fileDate.Before(*end)
+		} else {
+			matched = !fileDate.Equal(start)
+		}
+	case models.OpGreaterThan:
+		if end != nil {
+			matched = !fileDate.Before(*end)
+		} else {
+			matched = fileDate.After(start)
+		}
+	case models.OpGreaterEq:
+		matched = !fileDate.Before(start)
+	case models.OpLessThan:
+		matched = fileDate.Before(start)
+	case models.OpLessEq:
+		if end != nil {
+			matched = fileDate.Before(*end)
+		} else {
+			matched = fileDate.Before(start) || fileDate.Equal(start)
+		}
+	}
+	return matched, fmt.Sprintf("date %s %s", cond.Operator, cond.Value)
+}
+
+func parseDateRange(value string) (time.Time, *time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil, false
+	}
+
+	if full, err := time.Parse(time.RFC3339, value); err == nil {
+		return full, nil, true
+	}
+
+	layouts := []string{"2006", "2006-01", "2006-01-02"}
+	for _, layout := range layouts {
+		start, err := time.ParseInLocation(layout, value, time.Local)
+		if err != nil {
+			continue
+		}
+		end := start
+		switch layout {
+		case "2006":
+			end = start.AddDate(1, 0, 0)
+		case "2006-01":
+			end = start.AddDate(0, 1, 0)
+		default:
+			end = start.AddDate(0, 0, 1)
+		}
+		return start, &end, true
+	}
+
+	return time.Time{}, nil, false
 }
 
 // ParseRule parses CLI rule string e.g.:
@@ -318,14 +383,18 @@ func mapField(fieldStr string) (models.TargetField, error) {
 	switch strings.ToLower(fieldStr) {
 	case "type":
 		return models.FieldType, nil
-	case "ext", "extension", "format":
+	case "ext", "extension":
 		return models.FieldExtension, nil
+	case "format":
+		return models.FieldFormat, nil
 	case "size":
 		return models.FieldSize, nil
 	case "name", "filename":
 		return models.FieldName, nil
 	case "date", "modified", "modtime":
 		return models.FieldDate, nil
+	case "taken_date", "takendate":
+		return models.FieldTakenDate, nil
 	case "mime", "mimetype":
 		return models.FieldMIME, nil
 	default:

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Aswanidev-vs/chest/internal/filesystem"
 	"github.com/Aswanidev-vs/chest/internal/models"
@@ -17,30 +18,116 @@ type Planner struct {
 	engine          *rules.Engine
 	baseDestination string
 	collisionPolicy models.CollisionPolicy
+	dateSource      string
+	dateGranularity string
 	// flatDestination, when set, routes every matched file directly into
 	// baseDestination (ignoring the rule's category subfolder). Used by --name
 	// so users get a single named folder instead of named/category/.
 	flatDestination bool
 }
 
+// Option configures planner behavior without changing the existing constructor signature.
+type Option func(*Planner)
+
+// WithDate configures date placeholders and generated date sorting.
+func WithDate(source, granularity string) Option {
+	return func(p *Planner) {
+		p.dateSource = source
+		p.dateGranularity = granularity
+	}
+}
+
 // New creates a new Planner
-func New(engine *rules.Engine, baseDestination string, collisionPolicy models.CollisionPolicy) *Planner {
+func New(engine *rules.Engine, baseDestination string, collisionPolicy models.CollisionPolicy, opts ...Option) *Planner {
 	if collisionPolicy == "" {
 		collisionPolicy = models.CollisionSkip
 	}
-	return &Planner{
+	p := &Planner{
 		engine:          engine,
 		baseDestination: baseDestination,
 		collisionPolicy: collisionPolicy,
+		dateSource:      "modified",
+		dateGranularity: "year",
 	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 // NewFlat creates a Planner that routes all matches directly into
 // baseDestination, without appending each rule's category folder.
-func NewFlat(engine *rules.Engine, baseDestination string, collisionPolicy models.CollisionPolicy) *Planner {
-	p := New(engine, baseDestination, collisionPolicy)
+func NewFlat(engine *rules.Engine, baseDestination string, collisionPolicy models.CollisionPolicy, opts ...Option) *Planner {
+	p := New(engine, baseDestination, collisionPolicy, opts...)
 	p.flatDestination = true
 	return p
+}
+
+func (p *Planner) expandDestination(destination string, file models.File) (string, bool) {
+	destDir := destination
+	if strings.Contains(destDir, "{ext}") {
+		extName := strings.ToUpper(file.Extension)
+		if extName == "" {
+			extName = "NO_EXT"
+		}
+		destDir = strings.ReplaceAll(destDir, "{ext}", extName)
+	}
+
+	date, ok := p.dateFor(file)
+	if !ok {
+		return "", false
+	}
+	if containsDatePlaceholder(destDir) {
+		destDir = expandDatePlaceholders(destDir, date, p.dateGranularity)
+	}
+	return destDir, true
+}
+
+func (p *Planner) dateFor(file models.File) (time.Time, bool) {
+	source := p.dateSource
+	if source == "" {
+		source = "modified"
+	}
+	switch source {
+	case "auto":
+		if file.TakenDate != nil {
+			return *file.TakenDate, true
+		}
+		return file.ModTime, true
+	case "taken":
+		if file.TakenDate == nil {
+			return time.Time{}, false
+		}
+		return *file.TakenDate, true
+	default:
+		return file.ModTime, true
+	}
+}
+
+func containsDatePlaceholder(destination string) bool {
+	return strings.Contains(destination, "{date}") ||
+		strings.Contains(destination, "{year}") ||
+		strings.Contains(destination, "{month}") ||
+		strings.Contains(destination, "{day}")
+}
+
+func expandDatePlaceholders(destination string, date time.Time, granularity string) string {
+	if granularity == "" {
+		granularity = "year"
+	}
+	datePart := date.Format("2006")
+	switch granularity {
+	case "month":
+		datePart = date.Format("2006/01")
+	case "day":
+		datePart = date.Format("2006/01/02")
+	}
+
+	destDir := strings.ReplaceAll(destination, "{date}", datePart)
+	destDir = strings.ReplaceAll(destDir, "{year}", strconv.Itoa(date.Year()))
+	destDir = strings.ReplaceAll(destDir, "{month}", fmt.Sprintf("%02d", date.Month()))
+	destDir = strings.ReplaceAll(destDir, "{day}", fmt.Sprintf("%02d", date.Day()))
+	return destDir
 }
 
 // Plan creates the proposed set of operations
@@ -61,16 +148,10 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 		}
 
 		// Calculate destination folder
-		destDir := rule.Destination
-		if strings.Contains(destDir, "{ext}") {
-			extName := strings.ToUpper(file.Extension)
-			if extName == "" {
-				extName = "NO_EXT"
-			}
-			destDir = strings.ReplaceAll(destDir, "{ext}", extName)
-		}
-		if strings.Contains(destDir, "{year}") {
-			destDir = strings.ReplaceAll(destDir, "{year}", strconv.Itoa(file.ModTime.Year()))
+		destDir, ok := p.expandDestination(rule.Destination, file)
+		if !ok {
+			plan.SkippedFiles++
+			continue
 		}
 
 		// In flat mode every match goes straight into the base destination,

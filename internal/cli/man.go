@@ -26,7 +26,11 @@ indexing, and storage intelligence tool inspired by the Minecraft chest.
 
 It provides rule-based sorting, continuous background folder monitoring,
 fast concurrent fuzzy & content searching, safe reversible rollbacks,
-and local SQLite metadata indexing.`,
+and local SQLite metadata indexing.
+
+Files are detected by content signature and enriched with embedded metadata
+(EXIF dates, QuickTime creation times, PDF / Office / audio tags). The extractor
+registry is open: custom formats can be added programmatically.`,
 		Options: []string{
 			"-h, --help       Show brief CLI help",
 			"-v, --version    Show version and build info",
@@ -46,14 +50,19 @@ and local SQLite metadata indexing.`,
 		Synopsis: "chest sort [directory] [flags]",
 		Description: `Sorts files in target or current directory into organized compartments.
 Evaluates built-in presets or user-defined custom rules with priority ranking.
+Each file is signature-detected for its real format (magic bytes first, extension as
+fallback) and enriched with embedded metadata (EXIF/photography dates, QuickTime
+creation time, PDF / Office / audio tags) via built-in or custom extractors.
 Supports dry-run preview and automatic creation of destination folders.`,
 		Options: []string{
 			"-t, --type           Sort files into category folders (Images, Videos, Documents...)",
-			"-f, --format         Boolean flag (no value). Group files into folders by their real extension, e.g. MP4/, MP3/, PNG/ (uses each file's actual extension)",
+			"-f, --format         Boolean flag (no value). Group files into folders by their detected format using content signatures (magic bytes first, extension as fallback), e.g. MP4/, MP3/, PNG/",
 			"-s, --size           Sort files by size thresholds (Tiny, Small, Medium, Large, Huge)",
-			"-d, --date           Sort files by modification year (YYYY)",
+			"-d, --date           Sort files by date (default: modification year YYYY)",
+			"--date-source        Date source for --date and date placeholders: modified (default), auto, taken",
+			"--date-granularity   Date folder granularity: year (default), month, day",
 			"-p, --preset <name>  Apply built-in preset (downloads, media, developer, documents, photos)",
-			"-r, --rule <spec>    Custom rule on the fly (e.g. 'type=video && size>1GB -> Videos/Large')",
+			"--rule <spec>        Custom rule on the fly (e.g. 'type=video && size>1GB -> Videos/Large')",
 			"-i, --into <dir>     Base destination directory to move organized files into",
 			"--name <name>        Move ALL matching files flat into one folder in the target dir (e.g. --name \"Anime\" -> Anime/*.mp4); cannot be combined with --into",
 			"-n, --dry-run        Simulate organization without moving any files",
@@ -67,17 +76,21 @@ Supports dry-run preview and automatic creation of destination folders.`,
 			"chest sort ~/Downloads -t -p media   Sort downloads using media preset into categories",
 			"chest sort --dry-run                 Preview what files would be moved without changing anything",
 			"chest sort --rule \"*.mkv -> Movies\" Move all MKV files to Movies folder",
-			"chest sort --format                          Group by real extension -> MP4/, MP3/, PNG/ folders",
+			"chest sort --format                          Group by detected format -> MP4/, MP3/, PNG/ folders",
 			"chest sort --format --into \"out\"            Group by extension AND put all those folders inside ./out/",
 			"chest sort -t --into \"Organized\"   Put all categorized folders inside ./Organized/",
 			"chest sort -t --name \"Anime\"            Move all matched files flat into one folder named Anime",
 			"chest sort --rule \"*.mp4 -> Anime\"    \"->\" = move into that folder; here only *.mp4 files go into Anime",
+			"chest sort --date --date-granularity month        Group by modification year/month, e.g. 2025/01/",
+			"chest sort --date --date-source auto --date-granularity day --rule \"type=image -> Photos/{date}\"  Use embedded media date when available",
+			"chest sort --rule \"format=gocut -> GoCutProjects\"  Route a custom registered format (e.g. .gocut GoCut projects) by content-detected format",
 		},
 		Concepts: []string{
-			"CATEGORY MODES  -t/--type, -f/--format, -s/--size and -d/--date split a batch into MULTIPLE category folders (Images/, MP4/, Large Files/, 2024/, 2025/, 2026/).",
+			"CATEGORY MODES  -t/--type, -f/--format, -s/--size and -d/--date split a batch into MULTIPLE category folders (Images/, MP4/, Large Files/, 2024/, 2025/, 2026/). --date defaults to modification year; use --date-source auto and --date-granularity month|day for embedded media dates and finer folders.",
 			"FLAT MODES      --name <x> or --rule \"<matcher> -> <x>\" put matches into ONE folder. --name takes every matched file; --rule lets you choose WHICH files.",
 			"WRAPPING        --into <dir> places any mode's folders inside <dir>, e.g. --format --into out -> out/MP4/f.mp4.",
 			"RULE ARROW      In --rule, \"->\" means \"move into this folder\": the left side is what to match, the right side is the destination folder.",
+			"FORMAT RULE     In --rule, extension= matches the filename extension while format= matches the content-detected format. Example: format=pdf -> MyPdfs routes a PDF even if its extension was renamed. Custom extractors can be registered so format= understands your own file types.",
 		},
 		SeeAlso: []string{"preset", "undo", "history", "watch"},
 	},

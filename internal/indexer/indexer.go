@@ -987,7 +987,7 @@ func (s *Store) FindDuplicatesProgress(root string, pctStart, pctEnd int, progre
 		}
 		n := len(hashInfos)
 		if n > 0 {
-			emit(lerp(int(700 + int64(300) * int64(gi+1) / int64(n))))
+			emit(lerp(int(700 + int64(300)*int64(gi+1)/int64(n))))
 		}
 	}
 	emit(lerp(1000))

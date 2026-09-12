@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/Aswanidev-vs/chest/internal/classifier"
+	"github.com/Aswanidev-vs/chest/internal/metadata"
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/charlievieth/fastwalk"
 )
@@ -21,6 +22,7 @@ type ScanOptions struct {
 	Exclusions     []string                          // Names, patterns, or relative directories to skip
 	IgnoreDirs     []string                          // Output directories being created by CHEST
 	ClassifyFunc   func(filename, ext string) string // Optional: overrides built-in classifier
+	ExtractDates   bool                              // Read embedded media dates when available
 }
 
 // Scanner traverses files in a directory
@@ -114,8 +116,7 @@ func (s *Scanner) Scan(root string) ([]models.File, error) {
 			cat = classifier.ClassifyExtension(ext)
 		}
 
-		mu.Lock()
-		files = append(files, models.File{
+		file := models.File{
 			Path:      path,
 			RelPath:   relPath,
 			Name:      name,
@@ -125,7 +126,34 @@ func (s *Scanner) Scan(root string) ([]models.File, error) {
 			IsDir:     false,
 			IsHidden:  isHidden(path, name, info),
 			Category:  cat,
-		})
+		}
+		// Use the signature-based metadata extractor to enrich the record with a
+		// detected format, MIME type and any embedded metadata fields, plus the
+		// taken date when requested.
+		if meta, err := metadata.Extract(path, ext); err == nil {
+			if meta.Format != "" {
+				file.Format = meta.Format
+			}
+			if file.MIMEType == "" {
+				file.MIMEType = meta.MIMEType
+			}
+			// Signature-based detection knows formats the extension
+			// classifier does not; adopt its category only when the
+			// classifier had no opinion.
+			if file.Category == classifier.TypeOther && meta.Category != "" {
+				file.Category = meta.Category
+			}
+			if len(meta.Fields) > 0 {
+				file.Metadata = meta.Fields
+			}
+			if s.opts.ExtractDates && !meta.Date.Date.IsZero() {
+				file.TakenDate = &meta.Date.Date
+				file.TakenDateSource = meta.Date.Source
+			}
+		}
+
+		mu.Lock()
+		files = append(files, file)
 		mu.Unlock()
 
 		return nil

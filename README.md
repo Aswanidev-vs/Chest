@@ -40,7 +40,8 @@ make build
 ## Core Features
 
 - **Concurrent Search Engine**: Built using `fastwalk` for parallel directory traversal and `fzf/src/algo` for exact and fuzzy scoring. Supports filtering by file category, extension, size, modification date, and in-file content grep.
-- **Rule-Based Organization**: Sort by extensions, categories, file size boundaries, and modification year. Define custom rules on the CLI or use built-in presets (`downloads`, `media`, `documents`, `developer`, `photos`).
+- **Rule-Based Organization**: Sort by extensions, categories, file size boundaries, and date. `--date` defaults to modification-year folders, while `--date-source auto` can use embedded photo/video dates when available. Define custom rules on the CLI or use built-in presets (`downloads`, `media`, `documents`, `developer`, `photos`).
+- **Signature-Based Format Detection & Metadata Extraction**: Every file is inspected by content signature (magic bytes first, extension as fallback) to determine its true format, then enriched with embedded metadata — EXIF `DateTimeOriginal`/`CreateDate`, QuickTime `mvhd` creation time, PDF Info dictionary fields, and ID3 / Vorbis / RIFF-INFO audio tags, plus ZIP-based OOXML / ODF / EPUB core properties. The extractor registry is open, so custom binary formats can be registered programmatically (CHEST ships with a built-in custom-format example: `.gocut` GoCut project files, detected by JSON signature or extension, exposing `format=gocut`, MIME `application/x-gocut-project`, category `video`, and an embedded `createdAt` as the taken date) and then routed with `format=...` rules even when the extension is unknown or renamed.
 - **Safety First**:
   - Full dry-run preview (`chest sort --dry-run` or `-n`) before files move.
   - Interactive confirmations.
@@ -75,7 +76,7 @@ make build
 
 | Command | Description | Example |
 |---|---|---|
-| `chest sort` | Sort files using presets, flags, or custom rules; `--date` groups files into modification-year folders (`--allow-system` for OS dirs) | `chest sort ~/Downloads -d` |
+| `chest sort` | Sort files using presets, flags, or custom rules; `--date` groups by modification year by default, or embedded media date with `--date-source auto`; `--format`/`format=` use content-detected format (`--allow-system` for OS dirs) | `chest sort ~/Downloads -d --date-granularity month` |
 | `chest search` | Search files by name, metadata, or file content grep | `chest search "report" -e pdf -c "invoice"` |
 | `chest watch` | Continuously watch and organize incoming files (`--initial` sorts existing files first; `--allow-system` guard) | `chest watch ~/Downloads --preset media --initial` |
 | `chest history` | View previous operations log | `chest history` |

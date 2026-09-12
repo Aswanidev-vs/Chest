@@ -64,3 +64,36 @@ func TestEngineEvaluate(t *testing.T) {
 		t.Errorf("expected destination Videos for smallFile, got %s", rule.Destination)
 	}
 }
+
+func TestDateConditionsUseModificationTime(t *testing.T) {
+	rule, err := ParseRule("date=2024 -> Old", 10)
+	if err != nil {
+		t.Fatalf("ParseRule() error = %v", err)
+	}
+	file := models.File{ModTime: time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)}
+
+	matched, reason := matchRule(rule, file)
+	if !matched {
+		t.Fatalf("expected match, got reason %q", reason)
+	}
+}
+
+func TestTakenDateCondition(t *testing.T) {
+	rule, err := ParseRule("taken_date=2025-02 -> Photos", 10)
+	if err != nil {
+		t.Fatalf("ParseRule() error = %v", err)
+	}
+	taken := time.Date(2025, 2, 3, 4, 5, 6, 0, time.UTC)
+	file := models.File{TakenDate: &taken}
+
+	matched, reason := matchRule(rule, file)
+	if !matched {
+		t.Fatalf("expected match, got reason %q", reason)
+	}
+
+	file.TakenDate = nil
+	matched, _ = matchRule(rule, file)
+	if matched {
+		t.Fatal("expected missing taken date not to match")
+	}
+}
