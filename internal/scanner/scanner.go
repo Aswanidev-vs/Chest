@@ -23,6 +23,11 @@ type ScanOptions struct {
 	IgnoreDirs     []string                          // Output directories being created by CHEST
 	ClassifyFunc   func(filename, ext string) string // Optional: overrides built-in classifier
 	ExtractDates   bool                              // Read embedded media dates when available
+	// EnrichFunc optionally enriches a scanned file record after built-in
+	// metadata detection, e.g. via external metadata plugins. It returns the
+	// (possibly modified) file and true when it produced enrichment. Called
+	// once per file; must be safe for concurrent use during recursive scans.
+	EnrichFunc func(file models.File) (models.File, bool)
 }
 
 // Scanner traverses files in a directory
@@ -149,6 +154,14 @@ func (s *Scanner) Scan(root string) ([]models.File, error) {
 			if s.opts.ExtractDates && !meta.Date.Date.IsZero() {
 				file.TakenDate = &meta.Date.Date
 				file.TakenDateSource = meta.Date.Source
+			}
+		}
+
+		// External enrichment (e.g. metadata plugins) runs last so it can
+		// fill gaps or override values the built-in extractors produced.
+		if s.opts.EnrichFunc != nil {
+			if enriched, ok := s.opts.EnrichFunc(file); ok {
+				file = enriched
 			}
 		}
 

@@ -44,14 +44,21 @@ Use --initial to also sort files already present before starting to watch.`,
 				return err
 			}
 
+			// Metadata-capable plugins enrich incoming files with
+			// sample-based format/MIME/category/date/field data before
+			// planning. Cleanup runs when watch mode exits.
+			enricher := loadMetadataEnricher()
+			defer enricher.cleanup()
+
 			w, err := watcher.New(watcher.WatchOptions{
-				Directory: dir,
-				Preset:    presetName,
-				Rules:     rulesList,
-				Name:      name,
-				Debounce:  debounce,
-				DryRun:    dryRun,
-				Initial:   initial,
+				Directory:  dir,
+				Preset:     presetName,
+				Rules:      rulesList,
+				Name:       name,
+				Debounce:   debounce,
+				DryRun:     dryRun,
+				Initial:    initial,
+				EnrichFunc: enricher.enrich,
 			})
 			if err != nil {
 				return err

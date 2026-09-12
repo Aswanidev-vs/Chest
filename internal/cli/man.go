@@ -266,8 +266,9 @@ all zeros, and --refresh forces a fresh re-scan with stale/excluded-row purge.`,
 		Name:     "CHEST-PLUGIN(1) - External Plugin Management",
 		Synopsis: "chest plugin [command] [args...]",
 		Description: `Manages CHEST external-process plugins. Plugins run as isolated processes
-via hashicorp/go-plugin over RPC, exposing custom file classifiers or rules
-without touching the core binary.`,
+via hashicorp/go-plugin over RPC, exposing custom file classifiers, rules,
+or rich metadata inspection (format sniffing, embedded dates, extra fields)
+without touching the core binary. Capabilities: classifier, metadata, rule.`,
 		Options: []string{
 			"list                 List all installed plugins in ~/.chest/plugins",
 			"info <name>          View detailed capabilities, version, and author",

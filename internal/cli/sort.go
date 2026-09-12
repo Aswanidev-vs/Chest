@@ -231,6 +231,7 @@ func newSortCmd() *cobra.Command {
 			// Load installed plugins with classifier capability
 			var pluginServices []plugin.ClassifierService
 			var pluginCleanup func()
+			var enrichFunc func(models.File) (models.File, bool)
 			if mgr, err := plugin.NewManager(); err == nil {
 				var pluginRules []models.Rule
 				pluginServices, pluginRules, pluginCleanup = mgr.LoadAllClassifiers()
@@ -239,6 +240,19 @@ func newSortCmd() *cobra.Command {
 					if f.verbose {
 						fmt.Printf("[PLUGIN] Injected %d custom rules from %d plugins\n", len(pluginRules), len(pluginServices))
 					}
+				}
+
+				// Metadata-capable plugins enrich scanned files with
+				// sample-based format/MIME/category/date/field data.
+				enricher := loadMetadataEnricher()
+				defer enricher.cleanup()
+				enrichFunc = enricher.enrich
+				if f.verbose && enricher.services > 0 {
+					defer func() {
+						if n := enricher.enriched(); n > 0 {
+							fmt.Printf("[PLUGIN] Enriched %d file(s) via %d metadata plugin(s)\n", n, enricher.services)
+						}
+					}()
 				}
 			}
 			if pluginCleanup != nil {
@@ -272,6 +286,7 @@ func newSortCmd() *cobra.Command {
 				Exclusions:     exclusions,
 				ClassifyFunc:   classifyFunc,
 				ExtractDates:   dateSource != "modified",
+				EnrichFunc:     enrichFunc,
 			})
 
 			if f.verbose {
