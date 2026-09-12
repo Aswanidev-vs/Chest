@@ -15,9 +15,11 @@ import (
 	hplugin "github.com/hashicorp/go-plugin"
 )
 
-// HandshakeConfig ensures plugin and host agree on protocol
+// HandshakeConfig ensures plugin and host agree on protocol.
+// ProtocolVersion 2 adds the metadata capability (Inspect RPC); plugins built
+// against protocol 1 must be recompiled.
 var HandshakeConfig = hplugin.HandshakeConfig{
-	ProtocolVersion:  1,
+	ProtocolVersion:  2,
 	MagicCookieKey:   "CHEST_PLUGIN",
 	MagicCookieValue: "CHEST_IN_A_CHEST",
 }
@@ -27,13 +29,27 @@ var PluginMap = map[string]hplugin.Plugin{
 	"classifier": &ClassifierPluginRPC{},
 }
 
+// mergedPluginMap builds the full set of served plugin types for host
+// clients, combining the classifier and metadata protocols so a single
+// plugin binary can expose both capabilities over one connection.
+func mergedPluginMap() map[string]hplugin.Plugin {
+	m := make(map[string]hplugin.Plugin, len(PluginMap)+len(MetadataPluginMap))
+	for name, p := range PluginMap {
+		m[name] = p
+	}
+	for name, p := range MetadataPluginMap {
+		m[name] = p
+	}
+	return m
+}
+
 // Manifest represents plugin metadata stored in manifest.json, manifest.toml, or returned by plugin
 type Manifest struct {
 	Name         string   `json:"name" toml:"name"`
 	Version      string   `json:"version" toml:"version"`
 	Description  string   `json:"description" toml:"description"`
 	Author       string   `json:"author,omitempty" toml:"author,omitempty"`
-	Capabilities []string `json:"capabilities" toml:"capabilities"` // e.g. ["classifier", "preset", "rule"]
+	Capabilities []string `json:"capabilities" toml:"capabilities"` // e.g. ["classifier", "metadata", "preset", "rule"]
 	Binary       string   `json:"binary" toml:"binary"`             // executable filename
 }
 
@@ -274,7 +290,7 @@ func (m *Manager) LoadClassifier(name string) (ClassifierService, func(), error)
 
 	client := hplugin.NewClient(&hplugin.ClientConfig{
 		HandshakeConfig: HandshakeConfig,
-		Plugins:         PluginMap,
+		Plugins:         mergedPluginMap(),
 		Cmd:             exec.Command(binPath),
 	})
 
@@ -341,14 +357,7 @@ func (m *Manager) LoadAllClassifiers() ([]ClassifierService, []models.Rule, func
 	}
 
 	for _, p := range plugins {
-		hasClassifier := false
-		for _, cap := range p.Capabilities {
-			if cap == "classifier" {
-				hasClassifier = true
-				break
-			}
-		}
-		if !hasClassifier {
+		if !hasCapability(p.Capabilities, "classifier") {
 			continue
 		}
 
@@ -384,4 +393,3 @@ func ClassifyWithPlugins(services []ClassifierService, filename, ext string) str
 	}
 	return ""
 }
-

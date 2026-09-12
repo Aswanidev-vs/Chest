@@ -1,0 +1,7 @@
+{
+  "name": "rich-meta",
+  "version": "1.0.0",
+  "description": "Camera RAW format sniffing and XMP capture-date extraction",
+  "capabilities": ["metadata"],
+  "binary": "rich-meta"
+}

@@ -77,6 +77,7 @@
           <ul class="docs-nav-list">
             <li><a class="docs-nav-link" href="#plugin-overview">Plugin Overview</a></li>
             <li><a class="docs-nav-link" href="#plugin-walkthrough">Building a Plugin</a></li>
+            <li><a class="docs-nav-link" href="#plugin-metadata">Metadata Capability (v2)</a></li>
             <li><a class="docs-nav-link" href="#plugin-manifest">Manifest Spec (JSON / TOML)</a></li>
             <li><a class="docs-nav-link" href="#plugin-management">Plugin CLI Management</a></li>
           </ul>
@@ -661,6 +662,41 @@
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">plugin</span> <span class="t-subcmd">info</span> <span class="t-path">&lt;name&gt;</span>    <span class="t-comment"># View plugin metadata</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">plugin</span> <span class="t-subcmd">remove</span> <span class="t-path">&lt;name&gt;</span>  <span class="t-comment"># Uninstall a plugin</span></code></pre>
           </div>
+
+          <h3 id="plugin-metadata">Metadata Capability (protocol v2)</h3>
+          <p>
+            Plugins declaring the <code>metadata</code> capability implement
+            <code>plugin.MetadataService</code> and enrich every scanned file with
+            sample-based intelligence during <code>chest sort</code> and <code>chest watch</code>.
+            The host sends a bounded <code>models.FileSample</code> (path, name, extension,
+            size, plus the first 4&nbsp;KiB and last 1&nbsp;KiB of content) and merges the
+            returned <code>models.FileMetadata</code> — format, MIME type, category,
+            embedded capture date (<code>TakenDate</code>/<code>DateSource</code>) and
+            arbitrary <code>Fields</code> — into the file record, where rule conditions
+            and the index can use them. Enrichment is best-effort: broken plugins are
+            skipped, empty results change nothing, and the built-in signature extractor
+            remains the fallback.
+          </p>
+          <div class="code-block-wrapper">
+            <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
+            <pre class="code-block"><code><span class="t-key">func</span> (p *<span class="t-type">RichMetaPlugin</span>) <span class="t-fn">Inspect</span>(sample models.<span class="t-type">FileSample</span>) (models.<span class="t-type">FileMetadata</span>, <span class="t-type">error</span>) {
+    <span class="t-comment">// e.g. sniff camera RAW containers or parse XMP capture dates</span>
+    <span class="t-key">return</span> models.<span class="t-type">FileMetadata</span>{
+        <span class="t-json-key">Format</span>:     <span class="t-str">"CR3"</span>,
+        <span class="t-json-key">MIMEType</span>:   <span class="t-str">"image/x-cr3"</span>,
+        <span class="t-json-key">Category</span>:   <span class="t-str">"Image"</span>,
+        <span class="t-json-key">TakenDate</span>:  &amp;ts,
+        <span class="t-json-key">DateSource</span>: <span class="t-str">"xmp:photoshop:DateCreated"</span>,
+        <span class="t-json-key">Fields</span>:     <span class="t-key">map</span>[<span class="t-type">string</span>]<span class="t-type">string</span>{<span class="t-str">"raw_container"</span>: <span class="t-str">"ISO-BMFF/CRX"</span>},
+    }, <span class="t-key">nil</span>
+}</code></pre>
+          </div>
+          <p>
+            A complete working example — camera RAW sniffing plus XMP sidecar date
+            extraction — ships in <code>examples/plugins/rich-meta</code>. Protocol
+            version 2 is enforced by the handshake, so plugins built against v1 must
+            be recompiled.
+          </p>
 
         </article>
       </main>

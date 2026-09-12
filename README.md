@@ -121,6 +121,7 @@ CHEST provides an external plugin architecture powered by **`hashicorp/go-plugin
  │                                                             │
  │   [Manifest]        Name, Version, Capabilities             │
  │   [Classifier]      Classify(filename, ext) -> Category    │
+ │   [Metadata]        Inspect(FileSample) -> FileMetadata    │
  │   [Rule Provider]   GetCustomRules() -> []models.Rule       │
  └─────────────────────────────────────────────────────────────┘
 ```
@@ -136,7 +137,13 @@ When someone builds a plugin for CHEST, the goal is **not** to reinvent file ope
    - Plugins can return a slice of `models.Rule` structs with custom priority, conditions (extension, size, regex, date), and compartment destinations.
    - These rules are injected directly into the `rules.Engine`, allowing plugins to provide domain-specific sorting presets without modifying CHEST source code.
 
-3. **Process Isolation & Language Independence**:
+3. **Rich Metadata Inspection (`Inspect`)** (protocol v2):
+   - Plugins declaring the `metadata` capability receive a bounded `models.FileSample` per scanned file (path, name, extension, size, plus the first 4 KiB and last 1 KiB of content) and return a `models.FileMetadata`.
+   - Returned values fill or override format, MIME type, category, embedded capture dates (`TakenDate`/`DateSource`) and arbitrary metadata fields on the file record — e.g. sniffing camera RAW containers or reading capture dates from `.xmp` sidecars.
+   - Enrichment runs in `chest sort` and `chest watch` (best-effort: broken plugins are skipped, empty results change nothing) and the fields become available to rule conditions.
+   - See `examples/plugins/rich-meta` for a working plugin.
+
+4. **Process Isolation & Language Independence**:
    - Plugins execute as separate child processes communicating over RPC. A crash in a third-party plugin cannot crash the main CHEST engine or corrupt the filesystem.
    - Plugins can be developed in Go or any language supporting standard gRPC / HashiCorp plugin handshakes.
 

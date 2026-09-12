@@ -29,6 +29,12 @@ type WatchOptions struct {
 	Initial    bool
 	DryRun     bool
 	DateSource string
+	// EnrichFunc optionally enriches a scanned file with sample-based
+	// metadata (format sniffing, embedded dates, extra fields) before it is
+	// planned. When nil, files are planned with the built-in metadata only.
+	// The second return value reports whether the file was modified so the
+	// planner can skip re-planning untouched files.
+	EnrichFunc func(file models.File) (models.File, bool)
 }
 
 // EventKind identifies the type of activity reported to the watch output.
@@ -278,6 +284,14 @@ func (w *Watcher) processFile(filePath string, cb func(ev Event)) {
 		if w.opts.DateSource != "modified" && !meta.Date.Date.IsZero() {
 			file.TakenDate = &meta.Date.Date
 			file.TakenDateSource = meta.Date.Source
+		}
+	}
+
+	// External enrichment (e.g. metadata plugins) runs last so it can fill
+	// gaps or override values the built-in extractors produced.
+	if w.opts.EnrichFunc != nil {
+		if enriched, ok := w.opts.EnrichFunc(file); ok {
+			file = enriched
 		}
 	}
 
