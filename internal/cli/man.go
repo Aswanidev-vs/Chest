@@ -360,21 +360,27 @@ Requires the Go toolchain installed and available on your PATH.`,
 	"speedtest": {
 		Name:     "CHEST-SPEEDTEST(1) - Network Speed Test",
 		Synopsis: "chest speedtest [flags]",
-		Description: `Measure your connection speed from the terminal - no API key required.
-Runs TWO independent tests side-by-side and shows a comparison table:
+		Description: `Measure your connection speed - and, with --disk, your local storage - from the terminal, no API key required.
+NETWORK - two independent tests shown in a comparison table:
   - Ookla      real speedtest.net protocol: nearest server, multi-stream DL/UL, latency/jitter (accurate)
   - Cloudflare  stdlib test against speed.cloudflare.com (reference)
+DISK - add --disk for sequential read/write MB/s and random 4K IOPS on a private temp file.
 Use --ookla or --cloudflare to run only one. Use --json for machine output.`,
 		Options: []string{
 			"--ookla              Run only the Ookla (speedtest.net) test",
 			"--cloudflare         Run only the Cloudflare test",
+			"--disk               Run a local disk read/write benchmark (seq MB/s + random 4K IOPS)",
+			"--disk-path <dir>    Directory for the disk benchmark (default: system temp)",
+			"--disk-size <MiB>    Disk benchmark test-file size in MiB (max 8192)",
 			"-j, --json           Output results as machine-readable JSON",
 			"-h, --help           Show brief CLI help",
 		},
 		Examples: []string{
-			"chest speedtest                        Run both tests and compare",
+			"chest speedtest                        Run both net tests and compare",
 			"chest speedtest --ookla               Only the accurate Ookla test",
 			"chest speedtest --cloudflare          Only the quick Cloudflare test",
+			"chest speedtest --disk                Run the local disk benchmark",
+			"chest speedtest --disk --disk-path /mnt/data --disk-size 1024",
 			"chest speedtest --json                Machine-readable JSON output",
 		},
 		SeeAlso: []string{"update", "man"},

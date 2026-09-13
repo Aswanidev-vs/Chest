@@ -40,23 +40,32 @@ type speedResult struct {
 }
 
 // newSpeedtestCmd returns the `chest speedtest` command. It runs two
-// independent tests (Ookla + Cloudflare) side-by-side so you can compare.
+// independent tests (Ookla + Cloudflare) side-by-side so you can compare,
+// and can optionally run a local disk read/write benchmark via --disk.
 func newSpeedtestCmd() *cobra.Command {
 	var onlyOokla, onlyCloudflare bool
 	var jsonOut bool
+	var disk bool
+	var diskPath string
+	var diskSizeMiB int64
 
 	cmd := &cobra.Command{
 		Use:     "speedtest",
 		Aliases: []string{"net", "network"},
-		Short:   "Measure network speed (download/upload/ping/jitter) via Ookla + Cloudflare",
-		Long: `Measure your connection speed from the terminal - no API key required.
+		Short:   "Measure network speed (download/upload/ping/jitter) via Ookla + Cloudflare, or disk I/O with --disk",
+		Long: `Measure your connection speed - and, with --disk, your local storage - from the terminal, no API key required.
 
-Runs TWO independent tests side-by-side and shows them in a comparison table:
+NETWORK - runs TWO independent tests side-by-side in a comparison table:
   • Ookla      - the real speedtest.net protocol: nearest-server selection,
                  multi-stream download/upload, latency/jitter. Most accurate.
   • Cloudflare - a stdlib-only test against speed.cloudflare.com.
 
-Use --ookla or --cloudflare to run only one. Use --json for machine-readable output.`,
+DISK - add --disk to benchmark local block I/O on a private temp file
+(sequential MB/s read/write + random 4K IOPS). Writes are flushed so they
+reflect durable speed; reads may be served from the OS page cache.
+
+Use --ookla or --cloudflare to run only one network test. Use --json for
+machine-readable output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rows := make([]speedResult, 0, 6)
@@ -64,8 +73,16 @@ Use --ookla or --cloudflare to run only one. Use --json for machine-readable out
 			switch {
 			case onlyCloudflare:
 				runCloudflare(cmd.ErrOrStderr(), &rows)
+				if disk {
+					runDisk(cmd.ErrOrStderr(), &rows, diskPath, diskSizeMiB)
+				}
 			case onlyOokla:
 				runOokla(cmd.ErrOrStderr(), &rows)
+				if disk {
+					runDisk(cmd.ErrOrStderr(), &rows, diskPath, diskSizeMiB)
+				}
+			case disk:
+				runDisk(cmd.ErrOrStderr(), &rows, diskPath, diskSizeMiB)
 			default:
 				runOokla(cmd.ErrOrStderr(), &rows)
 				runCloudflare(cmd.ErrOrStderr(), &rows)
@@ -82,6 +99,9 @@ Use --ookla or --cloudflare to run only one. Use --json for machine-readable out
 
 	cmd.Flags().BoolVar(&onlyOokla, "ookla", false, "Run only the Ookla (speedtest.net) test")
 	cmd.Flags().BoolVar(&onlyCloudflare, "cloudflare", false, "Run only the Cloudflare test")
+	cmd.Flags().BoolVar(&disk, "disk", false, "Run a local disk read/write benchmark (sequential MB/s + random 4K IOPS)")
+	cmd.Flags().StringVar(&diskPath, "disk-path", "", "Directory for the disk benchmark (default: system temp)")
+	cmd.Flags().Int64Var(&diskSizeMiB, "disk-size", defaultDiskSizeMiB, fmt.Sprintf("Disk benchmark test-file size in MiB (max %d)", maxDiskSizeMiB))
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output results as JSON")
 	return cmd
 }
