@@ -67,7 +67,7 @@ make build
   - Automatic safeguards preventing modification to OS root volumes (`/`, `C:\`) and system paths (`C:\Windows`, `C:\Program Files`, `/etc`, `/usr`, `/var`, etc.).
   - Protected paths remain completely accessible for read-only commands (`search`, `stats`, `duplicates`, `analyze`, `index`).
   - Dangerous operations (`sort`, `watch`, `undo`) require explicit `--allow-system` override with confirmation.
-- **Network Speed Testing**: Compare Ookla (nearest speedtest.net server) and Cloudflare (`speed.cloudflare.com`) results, with download and upload bars shown as `◆` filled and `◇` empty diamonds; select `--ookla` or `--cloudflare`, or use `--json` for machine-readable output. Add `--disk` to also benchmark local storage (sequential read/write MB/s + random 4K IOPS) on a private temp file — size it with `--disk-size` and target a directory with `--disk-path`.
+- **Network and Disk Speed Testing**: Compare Ookla (nearest speedtest.net server) and Cloudflare (`speed.cloudflare.com`) results, with download and upload bars shown as `◆` filled and `◇` empty diamonds; select `--ookla` or `--cloudflare`, or use `--json` for machine-readable output. Use `--disk` for disk benchmark mode (sequential read/write MB/s + random 4K IOPS) on a private temp file — size it with `--disk-size` and target a directory with `--disk-path`.
 - **Plugin Architecture**: Extend classification and rule handling through independent external processes using `hashicorp/go-plugin` over standard RPC.
 
 ---
@@ -84,7 +84,7 @@ make build
 | `chest undo cache` | Inspect undo cache or wipe all history (`--clear`) | `chest undo cache --clear` |
 | `chest index` | Index directory metadata into local SQLite (incremental, parallel; `--except` to skip, prunes deleted/excluded rows on re-index) | `chest index ~/Documents --hash` |
 | `chest stats` | Display storage consumption and category breakdown; scoped runs auto-refresh, bare runs repopulate an empty cache, `--refresh` forces re-scan+purge, largest files shown with absolute paths | `chest stats ~/Projects --refresh` |
-| `chest speedtest` | Compare Ookla vs Cloudflare download/upload/ping/jitter; transfer bars use `◆` filled and `◇` empty diamonds | `chest speedtest` (both), `chest speedtest --ookla`, `chest speedtest --cloudflare`, `chest speedtest --json`, `chest speedtest --disk` (adds storage benchmark; `--disk-size`, `--disk-path`) |
+| `chest speedtest` | Compare Ookla vs Cloudflare download/upload/ping/jitter, or run disk benchmark mode with `--disk`; transfer bars use `◆` filled and `◇` empty diamonds | `chest speedtest` (both), `chest speedtest --ookla`, `chest speedtest --cloudflare`, `chest speedtest --json`, `chest speedtest --disk` (disk benchmark mode; `--disk-size`, `--disk-path`) |
 | `chest duplicates` | Locate duplicate files using content hashes (`--except` to skip dirs/globs; excluded rows are purged from the cache) | `chest duplicates ~/Downloads --except node_modules,venv` |
 | `chest analyze` | Read-only audit of storage distribution and old files (`--except`/`--refresh` supported; scoped runs auto-refresh, bare runs repopulate an empty cache), with total run time in the report footer | `chest analyze ~/Downloads --refresh` |
 | `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |
