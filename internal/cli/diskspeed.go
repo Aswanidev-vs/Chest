@@ -36,6 +36,7 @@ func runDisk(errOut io.Writer, rows *[]speedResult, dir string, sizeMiB int64) {
 		dir = os.TempDir()
 	}
 
+	// Reserve a unique temp path, then hand the same file to each phase.
 	f, err := os.CreateTemp(dir, "chest-disk-*.tmp")
 	if err != nil {
 		*rows = append(*rows, speedResult{label: "Disk", ok: false, err: fmt.Sprintf("create temp: %v", err)})
@@ -44,10 +45,35 @@ func runDisk(errOut io.Writer, rows *[]speedResult, dir string, sizeMiB int64) {
 	path := f.Name()
 	_ = f.Close()
 	defer os.Remove(path)
-	total := sizeMiB << 20
 
+	total := sizeMiB << 20
+	align := int64(directSector())
+
+	// Prefer direct (unbuffered) I/O so reads bypass the OS page cache. When
+	// the platform has no direct I/O (e.g. mac/BSD), fall back to buffered
+	// I/O and label the run honestly.
+	wf, err := openDirectWrite(path)
+	direct := err == nil
+	if !direct {
+		wf, err = os.Create(path)
+		if err != nil {
+			*rows = append(*rows, speedResult{label: "Disk", ok: false, err: fmt.Sprintf("create: %v", err)})
+			return
+		}
+	}
+	defer wf.Close()
+
+	if direct {
+		fmt.Fprintf(errOut, "  %sMode:%s %sdirect (unbuffered)%s - reads bypass OS cache\n", chestDim, chestReset, chestGold, chestReset)
+	} else {
+		fmt.Fprintf(errOut, "  %sMode:%s %sbuffered%s - no direct I/O on this platform; reads hit OS cache\n", chestDim, chestReset, chestGold, chestReset)
+	}
+
+	buf := newAlignedBuf(diskBlockSize, int(align))
+
+	// Write: stop the spinner before printing the result.
 	printSpin(errOut, fmt.Sprintf("Disk: writing %d MiB...", sizeMiB))
-	seqMBs, wErr := diskSeqWrite(path, total)
+	seqMBs, wErr := diskSeqWrite(wf, total, buf)
 	clearSpin(errOut)
 	if wErr != nil {
 		*rows = append(*rows, speedResult{label: "Disk write", ok: false, err: wErr.Error()})
@@ -56,18 +82,34 @@ func runDisk(errOut io.Writer, rows *[]speedResult, dir string, sizeMiB int64) {
 		*rows = append(*rows, speedResult{label: "Disk write", ok: true, detail: fmt.Sprintf("%.2f MB/s", seqMBs)})
 	}
 
+	// Read: reopen for (prefer direct) reading. clearSpin fires right after
+	// the read completes and BEFORE the result prints, so the spinner never
+	// shares a line with the measurement.
 	printSpin(errOut, "Disk: reading back...")
-	seqRMBs, rErr := diskSeqRead(path, total)
-	clearSpin(errOut)
+	rf, rErr := openDirectRead(path)
 	if rErr != nil {
+		rf, rErr = os.Open(path)
+	}
+	var seqRMBs float64
+	if rErr != nil {
+		clearSpin(errOut)
 		*rows = append(*rows, speedResult{label: "Disk read", ok: false, err: rErr.Error()})
 	} else {
-		fmt.Fprintf(errOut, "  %sRead:%s  %8.2f MB/s%s\n", chestPrimary, chestReset, seqRMBs, chestReset)
-		*rows = append(*rows, speedResult{label: "Disk read", ok: true, detail: fmt.Sprintf("%.2f MB/s", seqRMBs)})
+		seqRMBs, rErr = diskSeqRead(rf, total, buf)
+		rf.Close()
+		clearSpin(errOut)
+		if rErr != nil {
+			*rows = append(*rows, speedResult{label: "Disk read", ok: false, err: rErr.Error()})
+		} else {
+			fmt.Fprintf(errOut, "  %sRead:%s  %8.2f MB/s%s\n", chestPrimary, chestReset, seqRMBs, chestReset)
+			*rows = append(*rows, speedResult{label: "Disk read", ok: true, detail: fmt.Sprintf("%.2f MB/s", seqRMBs)})
+		}
 	}
 
+	// Random 4K: stop the spinner before printing both results.
 	printSpin(errOut, "Disk: random 4K read/write...")
-	r4k, w4k := diskRandom4K(path, total)
+	r4k, w4k := diskRandom4K(wf, total, buf[:disk4KSize], align)
+	clearSpin(errOut)
 	if r4k > 0 {
 		fmt.Fprintf(errOut, "  %s4K read:%s  %7.0f IOPS%s\n", chestPrimary, chestReset, r4k, chestReset)
 		*rows = append(*rows, speedResult{label: "Disk 4K read", ok: true, detail: fmt.Sprintf("%.0f IOPS", r4k)})
@@ -80,20 +122,12 @@ func runDisk(errOut io.Writer, rows *[]speedResult, dir string, sizeMiB int64) {
 	} else {
 		*rows = append(*rows, speedResult{label: "Disk 4K write", ok: false, err: "no writes completed"})
 	}
-	clearSpin(errOut)
 }
 
 // diskSeqWrite measures sequential write throughput. A warm-up half is
-// discarded first, and the file is fsynced so the result reflects data that
-// actually reached the device rather than the OS write cache.
-func diskSeqWrite(path string, total int64) (float64, error) {
-	f, err := os.Create(path)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	buf := make([]byte, diskBlockSize)
+// discarded first, and the file is synced so the result reflects data that
+// reached the device (direct mode flushes each write via WRITE_THROUGH).
+func diskSeqWrite(f *os.File, total int64, buf []byte) (float64, error) {
 	warm := int64(0)
 	for warm < total/2 {
 		if _, err := f.Write(buf); err != nil {
@@ -117,14 +151,9 @@ func diskSeqWrite(path string, total int64) (float64, error) {
 }
 
 // diskSeqRead measures sequential read throughput after a discarded warm-up.
-func diskSeqRead(path string, total int64) (float64, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	buf := make([]byte, diskBlockSize)
+// In direct mode the file is reopened unbuffered, so reads come from the
+// device rather than the OS page cache.
+func diskSeqRead(f *os.File, total int64, buf []byte) (float64, error) {
 	warm := int64(0)
 	for warm < total/2 {
 		n, err := f.Read(buf)
@@ -157,33 +186,28 @@ func diskSeqRead(path string, total int64) (float64, error) {
 }
 
 // diskRandom4K measures random 4K read and write IOPS against a bounded
-// region of the file, using shuffled offsets to exercise the device rather
-// than a sequential sweep. Writes are flushed so reported write IOPS reflect
-// durable writes.
-func diskRandom4K(path string, fileSize int64) (writeIOPS, readIOPS float64) {
+// region of the file, using shuffled sector-aligned offsets so direct I/O
+// (which requires aligned buffers/offsets) is satisfied. Writes are flushed.
+func diskRandom4K(f *os.File, fileSize int64, buf []byte, align int64) (writeIOPS, readIOPS float64) {
+	bsize := int64(len(buf))
 	region := int64(diskRandRegionMiB) << 20
 	if region > fileSize {
 		region = fileSize
 	}
-	if region < disk4KSize {
+	if region < bsize {
 		return 0, 0
 	}
-
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
-	if err != nil {
-		return 0, 0
+	if align < 1 {
+		align = 1
 	}
-	defer f.Close()
 
-	maxOff := region - disk4KSize
+	maxOff := region - bsize
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	offsets := make([]int64, diskRandOps)
 	for i := range offsets {
-		offsets[i] = rng.Int63n(maxOff)
+		offsets[i] = (rng.Int63n(maxOff) / align) * align
 	}
 	shuffle := func() { rng.Shuffle(len(offsets), func(i, j int) { offsets[i], offsets[j] = offsets[j], offsets[i] }) }
-
-	buf := make([]byte, disk4KSize)
 
 	shuffle()
 	start := time.Now()
@@ -192,13 +216,9 @@ func diskRandom4K(path string, fileSize int64) (writeIOPS, readIOPS float64) {
 			return 0, 0
 		}
 	}
-	if err := f.Sync(); err != nil {
-		return 0, 0
-	}
+	_ = f.Sync()
 	writeIOPS = float64(diskRandOps) / time.Since(start).Seconds()
 
-	// Reads hit the OS page cache for data just written, so read IOPS are a
-	// cached-read baseline (noted in the UI legend).
 	shuffle()
 	start = time.Now()
 	for _, off := range offsets {

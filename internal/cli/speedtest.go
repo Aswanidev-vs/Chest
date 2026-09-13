@@ -61,8 +61,9 @@ NETWORK - runs TWO independent tests side-by-side in a comparison table:
   • Cloudflare - a stdlib-only test against speed.cloudflare.com.
 
 DISK - add --disk to benchmark local block I/O on a private temp file
-(sequential MB/s read/write + random 4K IOPS). Writes are flushed so they
-reflect durable speed; reads may be served from the OS page cache.
+(sequential MB/s read/write + random 4K IOPS). Writes are flushed; reads
+use unbuffered (direct) I/O where the platform supports it so they reflect
+device speed rather than the OS page cache.
 
 Use --ookla or --cloudflare to run only one network test. Use --json for
 machine-readable output.`,

@@ -364,7 +364,7 @@ Requires the Go toolchain installed and available on your PATH.`,
 NETWORK - two independent tests shown in a comparison table:
   - Ookla      real speedtest.net protocol: nearest server, multi-stream DL/UL, latency/jitter (accurate)
   - Cloudflare  stdlib test against speed.cloudflare.com (reference)
-DISK - add --disk for sequential read/write MB/s and random 4K IOPS on a private temp file.
+DISK - add --disk for sequential read/write MB/s and random 4K IOPS on a private temp file (direct/unbuffered I/O where supported).
 Use --ookla or --cloudflare to run only one. Use --json for machine output.`,
 		Options: []string{
 			"--ookla              Run only the Ookla (speedtest.net) test",

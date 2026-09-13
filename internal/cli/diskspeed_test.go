@@ -2,9 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 func TestDiskMBs(t *testing.T) {
@@ -67,6 +69,21 @@ func TestPrintSpeedTableIncludesDisk(t *testing.T) {
 	}
 }
 
+// TestDirectBufferAligned verifies newAlignedBuf returns a view whose start
+// address is aligned, which FILE_FLAG_NO_BUFFERING and O_DIRECT require.
+func TestDirectBufferAligned(t *testing.T) {
+	align := uintptr(4096)
+	b := newAlignedBuf(1<<20, 4096)
+	if len(b) != 1<<20 {
+		t.Fatalf("len = %d, want %d", len(b), 1<<20)
+	}
+	if alignUp(uintptr(unsafe.Pointer(&b[0])), align) != uintptr(unsafe.Pointer(&b[0])) {
+		t.Fatalf("buffer start %p is not %d-byte aligned", &b[0], align)
+	}
+}
+
+func alignUp(addr, align uintptr) uintptr { return (addr + align - 1) &^ (align - 1) }
+
 // TestDiskBenchSmall runs the real benchmark helpers on a tiny file in a
 // temporary dir. It asserts the helpers complete and report sane positive
 // throughput without panicking and without leaking the test file.
@@ -75,23 +92,48 @@ func TestDiskBenchSmall(t *testing.T) {
 	path := filepath.Join(dir, "bench.bin")
 	const total = 4 << 20 // 4 MiB: warm-up writes 2 MiB, measured 4 MiB
 
-	w, err := diskSeqWrite(path, total)
+	// Open the file the same way runDisk does, falling back to buffered I/O
+	// on platforms without direct I/O, so the test works everywhere.
+	f, err := openDirectWrite(path)
+	if err != nil {
+		f, err = os.Create(path)
+	}
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	buf := newAlignedBuf(diskBlockSize, directSector())
+	w, err := diskSeqWrite(f, total, buf)
 	if err != nil {
 		t.Fatalf("diskSeqWrite: %v", err)
 	}
 	if w <= 0 {
 		t.Fatalf("seq write MB/s = %v, want > 0", w)
 	}
+	f.Close()
 
-	r, err := diskSeqRead(path, total)
+	rf, err := openDirectRead(path)
+	if err != nil {
+		rf, err = os.Open(path)
+	}
+	if err != nil {
+		t.Fatalf("read open: %v", err)
+	}
+	r, err := diskSeqRead(rf, total, newAlignedBuf(diskBlockSize, directSector()))
 	if err != nil {
 		t.Fatalf("diskSeqRead: %v", err)
 	}
 	if r <= 0 {
 		t.Fatalf("seq read MB/s = %v, want > 0", r)
 	}
+	rf.Close()
 
-	w4k, r4k := diskRandom4K(path, total)
+	wf, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer wf.Close()
+	w4k, r4k := diskRandom4K(wf, total, newAlignedBuf(disk4KSize, directSector()), int64(directSector()))
 	if w4k <= 0 {
 		t.Fatalf("4K write IOPS = %v, want > 0", w4k)
 	}

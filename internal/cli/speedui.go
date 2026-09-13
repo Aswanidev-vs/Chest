@@ -98,7 +98,7 @@ func printSpeedTable(w io.Writer, rows []speedResult) {
 	fmt.Fprintf(w, "  %sCloudflare = multi-stream vs speed.cloudflare.com (reference).%s\n", chestDim, chestReset)
 	for _, r := range rows {
 		if backendOf(r.label) == "Disk" {
-			fmt.Fprintf(w, "  %sDisk       = single-file on a temp file; writes are flushed. Reads may be served by OS cache.%s\n", chestDim, chestReset)
+			fmt.Fprintf(w, "  %sDisk       = single-file on a temp file; writes are flushed. Reads use direct (unbuffered) I/O where the platform supports it.%s\n", chestDim, chestReset)
 			break
 		}
 	}
