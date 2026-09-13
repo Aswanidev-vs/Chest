@@ -52,7 +52,14 @@ func printSpeedTable(w io.Writer, rows []speedResult) {
 	}
 	fmt.Fprintf(w, "  %s+%s%s+%s\n", chestDim, chestReset, strings.Repeat("-", inner), chestDim)
 	row("CHEST SPEED TEST", chestPrimary)
-	row("Ookla vs Cloudflare", chestDim)
+	sub := "Ookla vs Cloudflare"
+	for _, r := range rows {
+		if backendOf(r.label) == "Disk" {
+			sub = "Network + Disk"
+			break
+		}
+	}
+	row(sub, chestDim)
 	fmt.Fprintf(w, "  %s+%s%s+%s\n", chestDim, chestReset, strings.Repeat("-", inner), chestDim)
 
 	// Scale for the bar gauge: fastest transfer speed across all rows.
@@ -89,6 +96,12 @@ func printSpeedTable(w io.Writer, rows []speedResult) {
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "  %sOokla      = multi-stream vs a nearby speedtest server (accurate).%s\n", chestDim, chestReset)
 	fmt.Fprintf(w, "  %sCloudflare = multi-stream vs speed.cloudflare.com (reference).%s\n", chestDim, chestReset)
+	for _, r := range rows {
+		if backendOf(r.label) == "Disk" {
+			fmt.Fprintf(w, "  %sDisk       = single-file on a temp file; writes are flushed. Reads use direct (unbuffered) I/O where the platform supports it.%s\n", chestDim, chestReset)
+			break
+		}
+	}
 	fmt.Fprintf(w, "  %sCompare the two - don't average across different backends.%s\n", chestDim, chestReset)
 }
 
@@ -108,13 +121,28 @@ func backendOf(label string) string {
 	}
 }
 
-// metricOf reduces a row label to its metric name ("ping"/"download"/...).
+// metricOf reduces a row label to its metric name ("ping"/"download"/...
+// and the disk "read"/"write"/"4K read"/"4K write" metrics).
 func metricOf(label string) string {
 	lower := strings.ToLower(label)
+	if strings.Contains(lower, "4k") {
+		if strings.Contains(lower, "read") {
+			return "4K read"
+		}
+		if strings.Contains(lower, "write") {
+			return "4K write"
+		}
+	}
 	for _, m := range []string{"download", "upload", "ping"} {
 		if strings.Contains(lower, m) {
 			return m
 		}
+	}
+	if strings.Contains(lower, "read") {
+		return "read"
+	}
+	if strings.Contains(lower, "write") {
+		return "write"
 	}
 	return "test"
 }
@@ -196,20 +224,23 @@ func printSpeedJSON(w io.Writer, rows []speedResult) {
 		OK     bool     `json:"ok"`
 		Mbps   *float64 `json:"mbps,omitempty"`
 		Ms     *int64   `json:"ms,omitempty"`
+		Detail string   `json:"detail,omitempty"`
 		Error  string   `json:"error,omitempty"`
 	}
 	out := make([]jrow, 0, len(rows))
 	for _, r := range rows {
 		j := jrow{Method: r.label, OK: r.ok, Error: r.err}
+		var mb float64
+		var ms int64
 		lower := strings.ToLower(r.label)
 		if strings.Contains(lower, "download") || strings.Contains(lower, "upload") {
-			var v float64
-			fmt.Sscanf(r.detail, "%f", &v)
-			j.Mbps = &v
+			fmt.Sscanf(r.detail, "%f", &mb)
+			j.Mbps = &mb
 		} else if strings.Contains(lower, "ping") {
-			var v int64
-			fmt.Sscanf(r.detail, "%d", &v)
-			j.Ms = &v
+			fmt.Sscanf(r.detail, "%d", &ms)
+			j.Ms = &ms
+		} else if r.detail != "" {
+			j.Detail = r.detail
 		}
 		out = append(out, j)
 	}

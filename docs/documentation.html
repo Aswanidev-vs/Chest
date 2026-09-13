@@ -445,13 +445,15 @@
           </div>
 
           <h3 id="cmd-speedtest">chest speedtest</h3>
-          <p>Measures connection speed without an API key by running independent Ookla and Cloudflare tests side by side. The report includes download, upload, ping, and jitter. Select a backend with <code>--ookla</code> or <code>--cloudflare</code>, or use <code>--json</code> for machine-readable output.</p>
+<p>Measures connection speed without an API key by running independent Ookla and Cloudflare tests side by side. The report includes download, upload, ping, and jitter. Select a backend with <code>--ookla</code> or <code>--cloudflare</code>, or use <code>--json</code> for machine-readable output. Add <code>--disk</code> to also benchmark local storage throughput (sequential read/write MB/s plus random 4K IOPS) using direct, unbuffered I/O so reads bypass the OS page cache.</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span>                 <span class="t-comment"># Run both tests and compare</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span> <span class="t-flag">--ookla</span>        <span class="t-comment"># Run the accurate Ookla test only</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span> <span class="t-flag">--cloudflare</span> <span class="t-comment"># Run the Cloudflare reference test only</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span> <span class="t-flag">--json</span>        <span class="t-comment"># Emit structured JSON instead of the table</span></code></pre>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span> <span class="t-flag">--json</span>        <span class="t-comment"># Emit structured JSON instead of the table</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span> <span class="t-flag">--disk</span>        <span class="t-comment"># Add a local disk benchmark to the report</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span> <span class="t-flag">--disk</span> <span class="t-flag">--disk-size</span> 512 <span class="t-flag">--disk-path</span> D: <span class="t-comment"># Larger test file on drive D:</span></code></pre>
           </div>
 
           <table class="flag-table">
@@ -478,11 +480,27 @@
                 <td>boolean</td>
                 <td>Output structured JSON instead of the human-readable comparison table.</td>
               </tr>
+              <tr>
+                <td><span class="flag-badge">--disk</span></td>
+                <td>boolean</td>
+                <td>Also benchmark local storage: sequential read/write MB/s and random 4K read/write IOPS. Runs after the network tests and is reported in its own <code>-- Disk</code> section (and in the <code>detail</code> field of JSON output).</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--disk-path</span></td>
+                <td>string</td>
+                <td>Directory in which the temporary benchmark file is created. Defaults to the OS temp directory; pass a folder on another drive to test that drive.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--disk-size</span></td>
+                <td>int (MiB)</td>
+                <td>Size of the temporary benchmark file. Defaults to 256 MiB and is capped at 8192 MiB.</td>
+              </tr>
             </tbody>
           </table>
 
-          <h4>Output & diamond gauge</h4>
+          <h4>Output &amp; diamond gauge</h4>
           <p>The default report groups successful measurements by backend. Download and upload rows include a 16-cell gauge: <code>◆</code> marks a filled cell and <code>◇</code> marks an empty cell. Transfer bars are scaled against the fastest successful download or upload in the comparison, making relative throughput easy to scan; ping rows show latency and jitter without a gauge. Failed measurements are marked <code>FAIL</code> with the error detail, while <code>--json</code> returns the same measurements as structured rows.</p>
+          <p>When <code>--disk</code> is passed, the report gains a <code>-- Disk</code> section listing <code>write</code>/<code>read</code> throughput and <code>4K read</code>/<code>4K write</code> IOPS. Reads use direct (unbuffered) I/O where the platform supports it so results are not inflated by the OS page cache; on platforms without direct I/O support the mode line says <code>buffered</code> instead. Writes are flushed to the device before timing ends. The disk benchmark uses a single temporary file that is removed when the run completes.</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">speedtest</span>
