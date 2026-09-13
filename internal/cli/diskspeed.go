@@ -108,7 +108,7 @@ func runDisk(errOut io.Writer, rows *[]speedResult, dir string, sizeMiB int64) {
 
 	// Random 4K: stop the spinner before printing both results.
 	printSpin(errOut, "Disk: random 4K read/write...")
-	r4k, w4k := diskRandom4K(wf, total, buf[:disk4KSize], align)
+	w4k, r4k, w4kErr := diskRandom4K(wf, total, buf[:disk4KSize], align)
 	clearSpin(errOut)
 	if r4k > 0 {
 		fmt.Fprintf(errOut, "  %s4K read:%s  %7.0f IOPS%s\n", chestPrimary, chestReset, r4k, chestReset)
@@ -116,7 +116,9 @@ func runDisk(errOut io.Writer, rows *[]speedResult, dir string, sizeMiB int64) {
 	} else {
 		*rows = append(*rows, speedResult{label: "Disk 4K read", ok: false, err: "no reads completed"})
 	}
-	if w4k > 0 {
+	if w4kErr != nil {
+		*rows = append(*rows, speedResult{label: "Disk 4K write", ok: false, err: w4kErr.Error()})
+	} else if w4k > 0 {
 		fmt.Fprintf(errOut, "  %s4K write:%s %7.0f IOPS%s\n", chestPrimary, chestReset, w4k, chestReset)
 		*rows = append(*rows, speedResult{label: "Disk 4K write", ok: true, detail: fmt.Sprintf("%.0f IOPS", w4k)})
 	} else {
@@ -134,6 +136,9 @@ func diskSeqWrite(f *os.File, total int64, buf []byte) (float64, error) {
 			return 0, err
 		}
 		warm += int64(len(buf))
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return 0, err
 	}
 
 	start := time.Now()
@@ -167,6 +172,9 @@ func diskSeqRead(f *os.File, total int64, buf []byte) (float64, error) {
 			return 0, err
 		}
 	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return 0, err
+	}
 
 	start := time.Now()
 	read := int64(0)
@@ -188,14 +196,14 @@ func diskSeqRead(f *os.File, total int64, buf []byte) (float64, error) {
 // diskRandom4K measures random 4K read and write IOPS against a bounded
 // region of the file, using shuffled sector-aligned offsets so direct I/O
 // (which requires aligned buffers/offsets) is satisfied. Writes are flushed.
-func diskRandom4K(f *os.File, fileSize int64, buf []byte, align int64) (writeIOPS, readIOPS float64) {
+func diskRandom4K(f *os.File, fileSize int64, buf []byte, align int64) (writeIOPS, readIOPS float64, writeErr error) {
 	bsize := int64(len(buf))
 	region := int64(diskRandRegionMiB) << 20
 	if region > fileSize {
 		region = fileSize
 	}
 	if region < bsize {
-		return 0, 0
+		return 0, 0, nil
 	}
 	if align < 1 {
 		align = 1
@@ -213,21 +221,21 @@ func diskRandom4K(f *os.File, fileSize int64, buf []byte, align int64) (writeIOP
 	start := time.Now()
 	for _, off := range offsets {
 		if _, err := f.WriteAt(buf, off); err != nil {
-			return 0, 0
+			return 0, 0, err
 		}
 	}
-	_ = f.Sync()
+	writeErr = f.Sync()
 	writeIOPS = float64(diskRandOps) / time.Since(start).Seconds()
 
 	shuffle()
 	start = time.Now()
 	for _, off := range offsets {
 		if _, err := f.ReadAt(buf, off); err != nil {
-			return 0, 0
+			return writeIOPS, 0, writeErr
 		}
 	}
 	readIOPS = float64(diskRandOps) / time.Since(start).Seconds()
-	return writeIOPS, readIOPS
+	return writeIOPS, readIOPS, writeErr
 }
 
 // diskMBs converts a byte count and elapsed seconds into decimal MB/s.

@@ -53,10 +53,21 @@ func printSpeedTable(w io.Writer, rows []speedResult) {
 	fmt.Fprintf(w, "  %s+%s%s+%s\n", chestDim, chestReset, strings.Repeat("-", inner), chestDim)
 	row("CHEST SPEED TEST", chestPrimary)
 	sub := "Ookla vs Cloudflare"
+	hasDisk := false
+	hasNetwork := false
 	for _, r := range rows {
-		if backendOf(r.label) == "Disk" {
+		switch backendOf(r.label) {
+		case "Disk":
+			hasDisk = true
+		case "Ookla", "Cloudflare":
+			hasNetwork = true
+		}
+	}
+	if hasDisk {
+		if hasNetwork {
 			sub = "Network + Disk"
-			break
+		} else {
+			sub = "Disk"
 		}
 	}
 	row(sub, chestDim)

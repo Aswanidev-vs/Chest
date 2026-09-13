@@ -358,13 +358,13 @@ Requires the Go toolchain installed and available on your PATH.`,
 		SeeAlso: []string{"version", "man"},
 	},
 	"speedtest": {
-		Name:     "CHEST-SPEEDTEST(1) - Network Speed Test",
+		Name:     "CHEST-SPEEDTEST(1) - Network and Disk Speed Test",
 		Synopsis: "chest speedtest [flags]",
-		Description: `Measure your connection speed - and, with --disk, your local storage - from the terminal, no API key required.
+		Description: `Measure network or disk performance from the terminal, no API key required.
 NETWORK - two independent tests shown in a comparison table:
   - Ookla      real speedtest.net protocol: nearest server, multi-stream DL/UL, latency/jitter (accurate)
   - Cloudflare  stdlib test against speed.cloudflare.com (reference)
-DISK - add --disk for sequential read/write MB/s and random 4K IOPS on a private temp file (direct/unbuffered I/O where supported).
+DISK - use --disk for disk benchmark mode: sequential read/write MB/s and random 4K IOPS on a private temp file (direct/unbuffered I/O where supported).
 Use --ookla or --cloudflare to run only one. Use --json for machine output.`,
 		Options: []string{
 			"--ookla              Run only the Ookla (speedtest.net) test",
