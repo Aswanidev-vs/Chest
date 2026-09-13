@@ -61,16 +61,22 @@
             '<span class="term-ln">    - <span class="t-path">backup/old_bundle.js</span> <span class="t-dim">(71 MB)</span></span>'
     },
     speedtest: {
-      title: 'bash — network diagnostics (chest speedtest)',
-      html: '<span class="term-ln"><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-cmd">speedtest</span></span>' +
+      title: 'bash — network + disk diagnostics (chest speedtest)',
+      html: '<span class="term-ln"><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-cmd">speedtest</span> <span class="t-flag">--disk</span></span>' +
             '<span class="term-ln"></span>' +
-            '<span class="term-ln"><span class="t-key">CHEST SPEED TEST</span> <span class="t-dim"># Ookla vs Cloudflare</span></span>' +
+            '<span class="term-ln"><span class="t-key">CHEST SPEED TEST</span> <span class="t-dim"># Ookla vs Cloudflare + Disk</span></span>' +
             '<span class="term-ln"><span class="t-key">Ookla</span></span>' +
             '<span class="term-ln">  <span class="t-cmd">download</span> <span class="t-ok">800.00 Mbps</span>  <span class="t-key">[◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆]</span></span>' +
             '<span class="term-ln">  <span class="t-cmd">upload</span>   <span class="t-ok">200.00 Mbps</span>  <span class="t-key">[◆◆◆◆◇◇◇◇◇◇◇◇◇◇◇◇]</span></span>' +
             '<span class="term-ln"><span class="t-key">Cloudflare</span></span>' +
             '<span class="term-ln">  <span class="t-cmd">download</span> <span class="t-ok">400.00 Mbps</span>  <span class="t-key">[◆◆◆◆◆◆◆◆◇◇◇◇◇◇◇◇]</span></span>' +
-            '<span class="term-ln">  <span class="t-cmd">upload</span>   <span class="t-ok">100.00 Mbps</span>  <span class="t-key">[◆◆◇◇◇◇◇◇◇◇◇◇◇◇◇◇]</span></span>'
+            '<span class="term-ln">  <span class="t-cmd">upload</span>   <span class="t-ok">100.00 Mbps</span>  <span class="t-key">[◆◆◇◇◇◇◇◇◇◇◇◇◇◇◇◇]</span></span>' +
+            '<span class="term-ln"></span>' +
+            '<span class="term-ln"><span class="t-key">Disk</span> <span class="t-dim"># direct (unbuffered) I/O</span></span>' +
+            '<span class="term-ln">  <span class="t-cmd">write</span>    <span class="t-ok">880.00 MB/s</span></span>' +
+            '<span class="term-ln">  <span class="t-cmd">read</span>     <span class="t-ok">1100.00 MB/s</span></span>' +
+            '<span class="term-ln">  <span class="t-cmd">4K read</span>  <span class="t-ok">5500 IOPS</span></span>' +
+            '<span class="term-ln">  <span class="t-cmd">4K write</span> <span class="t-ok">4100 IOPS</span></span>'
     },
     undo: {
       title: 'bash — ~/Downloads (chest undo)',

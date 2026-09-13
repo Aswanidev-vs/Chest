@@ -293,7 +293,7 @@
             <span class="cmd-tag">chest speedtest</span>
             <i data-lucide="gauge" style="color: var(--text-dim);"></i>
           </div>
-          <p class="cmd-desc">Compares Ookla and Cloudflare download, upload, ping, and jitter results. Transfer rows use a 16-cell diamond gauge with <code>◆</code> filled and <code>◇</code> empty cells.</p>
+          <p class="cmd-desc">Compares Ookla and Cloudflare download, upload, ping, and jitter results. Transfer rows use a 16-cell diamond gauge with <code>◆</code> filled and <code>◇</code> empty cells. Pass <code>--disk</code> to benchmark local storage too — sequential read/write MB/s plus random 4K IOPS, reported in a dedicated <code>-- Disk</code> section (size the test file with <code>--disk-size</code>, target another drive with <code>--disk-path</code>).</p>
           <div class="cmd-snippet">
             <span>chest speedtest</span>
             <i data-lucide="chevron-right"></i>

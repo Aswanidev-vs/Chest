@@ -84,7 +84,7 @@ make build
 | `chest undo cache` | Inspect undo cache or wipe all history (`--clear`) | `chest undo cache --clear` |
 | `chest index` | Index directory metadata into local SQLite (incremental, parallel; `--except` to skip, prunes deleted/excluded rows on re-index) | `chest index ~/Documents --hash` |
 | `chest stats` | Display storage consumption and category breakdown; scoped runs auto-refresh, bare runs repopulate an empty cache, `--refresh` forces re-scan+purge, largest files shown with absolute paths | `chest stats ~/Projects --refresh` |
-| `chest speedtest` | Compare Ookla vs Cloudflare download/upload/ping/jitter; transfer bars use `◆` filled and `◇` empty diamonds | `chest speedtest` (both), `chest speedtest --ookla`, `chest speedtest --cloudflare`, `chest speedtest --json` |
+| `chest speedtest` | Compare Ookla vs Cloudflare download/upload/ping/jitter; transfer bars use `◆` filled and `◇` empty diamonds | `chest speedtest` (both), `chest speedtest --ookla`, `chest speedtest --cloudflare`, `chest speedtest --json`, `chest speedtest --disk` (adds storage benchmark; `--disk-size`, `--disk-path`) |
 | `chest duplicates` | Locate duplicate files using content hashes (`--except` to skip dirs/globs; excluded rows are purged from the cache) | `chest duplicates ~/Downloads --except node_modules,venv` |
 | `chest analyze` | Read-only audit of storage distribution and old files (`--except`/`--refresh` supported; scoped runs auto-refresh, bare runs repopulate an empty cache), with total run time in the report footer | `chest analyze ~/Downloads --refresh` |
 | `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |
