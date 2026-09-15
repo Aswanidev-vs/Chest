@@ -86,6 +86,20 @@ func TestSortDateSourceTakenDryRun(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestSortDateMonthNamesDryRun verifies month granularity renders month names
+// by default and numeric months with --month-format number. The regex matches
+// separators from either OS since the dry run prints native paths.
+func TestSortDateMonthNamesDryRun(t *testing.T) {
+	output, err := runSortDryRun(t, "--date", "--date-granularity", "month")
+	require.NoError(t, err)
+	assert.Regexp(t, `\d{4}[/\\][A-Z][a-z]{2}[/\\]`, output, "default month granularity should use month names")
+
+	numeric, err := runSortDryRun(t, "--date", "--date-granularity", "month", "--month-format", "number")
+	require.NoError(t, err)
+	assert.Regexp(t, `\d{4}[/\\]\d{2}[/\\]`, numeric, "--month-format number should use numeric months")
+	assert.NotRegexp(t, `\d{4}[/\\][A-Z][a-z]{2}[/\\]`, numeric, "numeric format must not emit month names")
+}
+
 // TestSortDateInvalidFlags ensures invalid flag combos fail with the right
 // error (regression guard for flag validation).
 func TestSortDateInvalidFlags(t *testing.T) {
@@ -96,6 +110,7 @@ func TestSortDateInvalidFlags(t *testing.T) {
 	}{
 		{"bad source", []string{"--date", "--date-source", "created"}, "invalid date source"},
 		{"bad granularity", []string{"--date", "--date-granularity", "week"}, "invalid date granularity"},
+		{"bad month format", []string{"--date", "--month-format", "roman"}, "invalid month format"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

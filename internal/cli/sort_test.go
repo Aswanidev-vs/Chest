@@ -21,6 +21,11 @@ func TestSortDateFlagValidation(t *testing.T) {
 			args:        []string{"--date", "--date-granularity", "week", "--dry-run"},
 			wantErrPart: "invalid date granularity",
 		},
+		{
+			name:        "invalid month format",
+			args:        []string{"--date", "--month-format", "roman", "--dry-run"},
+			wantErrPart: "invalid month format",
+		},
 	}
 
 	for _, tt := range tests {

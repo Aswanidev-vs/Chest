@@ -28,6 +28,7 @@ type sortFlags struct {
 	byDate          bool
 	dateSource      string
 	dateGranularity string
+	monthFormat     string
 	into            string
 	name            string
 	preset          string
@@ -122,6 +123,16 @@ func newSortCmd() *cobra.Command {
 			case "year", "month", "day":
 			default:
 				return fmt.Errorf("invalid date granularity '%s'. Valid: year, month, day", f.dateGranularity)
+			}
+
+			monthFormat := strings.ToLower(f.monthFormat)
+			if monthFormat == "" {
+				monthFormat = "name"
+			}
+			switch monthFormat {
+			case "name", "number":
+			default:
+				return fmt.Errorf("invalid month format '%s'. Valid: name, number", f.monthFormat)
 			}
 
 			// Assemble rules
@@ -350,9 +361,9 @@ func newSortCmd() *cobra.Command {
 
 			var pl *planner.Planner
 			if flat {
-				pl = planner.NewFlat(engine, baseDest, collisionPolicy, planner.WithDate(dateSource, dateGranularity))
+				pl = planner.NewFlat(engine, baseDest, collisionPolicy, planner.WithDate(dateSource, dateGranularity, monthFormat))
 			} else {
-				pl = planner.New(engine, baseDest, collisionPolicy, planner.WithDate(dateSource, dateGranularity))
+				pl = planner.New(engine, baseDest, collisionPolicy, planner.WithDate(dateSource, dateGranularity, monthFormat))
 			}
 
 			plan, err := pl.Plan(absTarget, files)
@@ -449,6 +460,7 @@ func newSortCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&f.byDate, "date", "d", false, "Sort by date")
 	cmd.Flags().StringVar(&f.dateSource, "date-source", "modified", "Date source for --date and date placeholders: modified, auto, taken")
 	cmd.Flags().StringVar(&f.dateGranularity, "date-granularity", "year", "Date folder granularity for --date and date placeholders: year, month, day")
+	cmd.Flags().StringVar(&f.monthFormat, "month-format", "name", "Month folder format for --date and {month} placeholder: name (Jan, Feb), number (01, 02)")
 	cmd.Flags().StringVarP(&f.into, "into", "i", "", "Custom destination folder")
 	cmd.Flags().StringVar(&f.name, "name", "", "Move all matched files flat into this folder inside the target directory (e.g. --name \"Anime\" -> Anime/*.mp4); cannot be combined with --into")
 	cmd.Flags().StringVarP(&f.preset, "preset", "p", "", "Use predefined preset (downloads, media, documents, developer, photos)")
