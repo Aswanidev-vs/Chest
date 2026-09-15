@@ -615,9 +615,9 @@ chest sort --size
 
 ```
 
-Date sorting defaults to modification year for backward compatibility. For media files with embedded dates, use `--date-source auto` to prefer EXIF/QuickTime taken/creation dates and fall back to modification time when metadata is missing. Use `--date-granularity year|month|day` to control folder depth.
+Date sorting defaults to modification year for backward compatibility. For media files with embedded dates, use `--date-source auto` to prefer EXIF/QuickTime taken/creation dates and fall back to modification time when metadata is missing. Use `--date-granularity year|month|day` to control folder depth; month folders are named by default (`2025/Jan/`), and `--month-format number` switches them to zero-padded numbers (`2025/01/`).
 
-Custom rules can use date placeholders from the selected source: `{date}`, `{year}`, `{month}`, and `{day}`. Example: `chest sort --rule "type=image -> Photos/{date}" --date-source auto --date-granularity day`.
+Custom rules can use date placeholders from the selected source: `{date}`, `{year}`, `{month}`, and `{day}`. `{month}` follows `--month-format` (`Jan` by default, `01` with `number`), while `{year}` and `{day}` are always numeric. Example: `chest sort --rule "type=image -> Photos/{date}" --date-source auto --date-granularity day`.
 
 Multiple criteria may be combined:
 

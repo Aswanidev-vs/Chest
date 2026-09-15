@@ -20,6 +20,7 @@ type Planner struct {
 	collisionPolicy models.CollisionPolicy
 	dateSource      string
 	dateGranularity string
+	dateMonthFormat string
 	// flatDestination, when set, routes every matched file directly into
 	// baseDestination (ignoring the rule's category subfolder). Used by --name
 	// so users get a single named folder instead of named/category/.
@@ -30,10 +31,12 @@ type Planner struct {
 type Option func(*Planner)
 
 // WithDate configures date placeholders and generated date sorting.
-func WithDate(source, granularity string) Option {
+// monthFormat is "name" (Jan) or "number" (01); anything else behaves as "name".
+func WithDate(source, granularity, monthFormat string) Option {
 	return func(p *Planner) {
 		p.dateSource = source
 		p.dateGranularity = granularity
+		p.dateMonthFormat = monthFormat
 	}
 }
 
@@ -48,6 +51,7 @@ func New(engine *rules.Engine, baseDestination string, collisionPolicy models.Co
 		collisionPolicy: collisionPolicy,
 		dateSource:      "modified",
 		dateGranularity: "year",
+		dateMonthFormat: "name",
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -78,7 +82,7 @@ func (p *Planner) expandDestination(destination string, file models.File) (strin
 		return "", false
 	}
 	if containsDatePlaceholder(destDir) {
-		destDir = expandDatePlaceholders(destDir, date, p.dateGranularity)
+		destDir = expandDatePlaceholders(destDir, date, p.dateGranularity, p.dateMonthFormat)
 	}
 	return destDir, true
 }
@@ -111,22 +115,30 @@ func containsDatePlaceholder(destination string) bool {
 		strings.Contains(destination, "{day}")
 }
 
-func expandDatePlaceholders(destination string, date time.Time, granularity string) string {
+func expandDatePlaceholders(destination string, date time.Time, granularity, monthFormat string) string {
 	if granularity == "" {
 		granularity = "year"
 	}
-	datePart := date.Format("2006")
+	month := date.Format("Jan")
+	if monthFormat == "number" {
+		month = fmt.Sprintf("%02d", date.Month())
+	}
+
+	year := strconv.Itoa(date.Year())
+	day := fmt.Sprintf("%02d", date.Day())
+
+	datePart := year
 	switch granularity {
 	case "month":
-		datePart = date.Format("2006/01")
+		datePart = year + "/" + month
 	case "day":
-		datePart = date.Format("2006/01/02")
+		datePart = year + "/" + month + "/" + day
 	}
 
 	destDir := strings.ReplaceAll(destination, "{date}", datePart)
-	destDir = strings.ReplaceAll(destDir, "{year}", strconv.Itoa(date.Year()))
-	destDir = strings.ReplaceAll(destDir, "{month}", fmt.Sprintf("%02d", date.Month()))
-	destDir = strings.ReplaceAll(destDir, "{day}", fmt.Sprintf("%02d", date.Day()))
+	destDir = strings.ReplaceAll(destDir, "{year}", year)
+	destDir = strings.ReplaceAll(destDir, "{month}", month)
+	destDir = strings.ReplaceAll(destDir, "{day}", day)
 	return destDir
 }
 

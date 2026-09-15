@@ -90,7 +90,7 @@
 
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;">
             <span class="badge" style="background: rgba(16, 185, 129, 0.1); color: var(--accent-emerald); border: 1px solid rgba(16, 185, 129, 0.25); padding: 4px 12px; border-radius: 9999px; font-size: 0.8rem; font-weight: 600;">
-              <i data-lucide="book-open"></i> Technical Manual • v0.1.0
+              <i data-lucide="book-open"></i> Technical Manual 
             </span>
             <span style="font-size: 0.8rem; color: var(--text-muted); font-family: var(--font-mono);">chest(1) Manual</span>
           </div>
@@ -259,7 +259,12 @@
               <tr>
                 <td><span class="flag-badge">--date-granularity</span></td>
                 <td>string</td>
-                <td>Date folder granularity: <code>year</code> (default), <code>month</code> (<code>YYYY/MM</code>), or <code>day</code> (<code>YYYY/MM/DD</code>).</td>
+                <td>Date folder granularity: <code>year</code> (default), <code>month</code> (<code>YYYY/Jan</code>), or <code>day</code> (<code>YYYY/Jan/05</code>). Month folders use month names unless <code>--month-format number</code> selects <code>YYYY/01</code> / <code>YYYY/01/05</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--month-format</span></td>
+                <td>string</td>
+                <td>How <code>--date</code> and the <code>{month}</code> placeholder render months: <code>name</code> (default, <code>Jan</code>, <code>Feb</code>), or <code>number</code> (zero-padded, <code>01</code>, <code>02</code>). Only affects month granularity, day granularity, and <code>{month}</code>; years and days stay numeric.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">-f, --format</span></td>
