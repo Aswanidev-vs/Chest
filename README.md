@@ -48,6 +48,7 @@ make build
   - Built-in collision policies: `skip`, `rename`, `replace`, or `abort`.
   - Comprehensive operation logging and rollbacks via `chest undo`.
 - **Folder Watch Automation**: Monitor directories continuously with `chest watch`. New files are picked up via filesystem events (`fsnotify`) and sorted automatically with debounce safeguards. Use `--initial` to sort what's already in the folder before watching, and get instant terminal feedback when folders are created or removed.
+- **Interactive Rules Builder**: Design a rule set with `chest repl`. The directory is scanned once, then `add` / `edit` / `rm` refine the rules while `preview` re-plans from the current set on every keystroke and renders the same dry-run report as `sort --dry-run` — `preview` is strictly read-only, and only `apply` moves files (recorded in history, so `chest undo` reverts the run). Reusable rule sets live in `~/.chest/templates` as TOML, which keeps fields the rule-string syntax cannot express.
 - **Local Indexing & Analysis**:
   - Incremental metadata and SHA256 hashing backed by pure-Go SQLite (`ncruces/go-sqlite3`).
   - Storage analytics with `chest stats`.
@@ -78,6 +79,7 @@ make build
 |---|---|---|
 | `chest sort` | Sort files using presets, flags, or custom rules; `--date` groups by modification year by default, or embedded media date with `--date-source auto`; `--date-granularity month|day` groups into named month folders (`2025/Jan/`), or `2025/01/` with `--month-format number`; `--format`/`format=` use content-detected format (`--allow-system` for OS dirs) | `chest sort ~/Downloads -d --date-granularity month` |
 | `chest search` | Search files by name, metadata, or file content grep | `chest search "report" -e pdf -c "invoice"` |
+| `chest repl` | Interactive rules builder with a live, read-only preview; `preview` re-plans from the current rules and never touches disk, only `apply` moves files (recorded in history, so `chest undo` reverts it). Save reusable rule sets to `~/.chest/templates` | `chest repl ~/Downloads -p media` |
 | `chest watch` | Continuously watch and organize incoming files (`--initial` sorts existing files first; `--allow-system` guard) | `chest watch ~/Downloads --preset media --initial` |
 | `chest history` | View previous operations log | `chest history` |
 | `chest undo` | Revert latest operation or specific ID, auto-cleaning empty created directories | `chest undo` or `chest undo 3` |
@@ -93,6 +95,153 @@ make build
 | `chest preset` | List available built-in sorting presets | `chest preset` |
 | `chest completion` | Install shell tab-completion for `bash`, `zsh`, `fish` (`--install` auto-detects `$SHELL`) | `chest completion --install` |
 | `chest version` | Display version and build architecture | `chest version` |
+
+---
+
+## Building a Rule Set Interactively (`chest repl`)
+
+`chest repl` is the loop for designing a rule set: the directory is scanned once, then you
+add, refine and preview rules until the plan looks right, and only `apply` moves anything.
+
+```bash
+chest repl ~/Downloads
+```
+
+### 1. Build — start broad, check as you go
+
+```text
+chest> add type=Video -> Videos
+added type=Video -> Videos
+chest> add type=Image -> Images
+added type=Image -> Images
+chest> list
+2 rule(s):
+   1. type=Video -> Videos
+   2. type=Image -> Images
+chest> preview
+CHEST PLAN
+────────────────────────
+
+bigvideo.mp4
+  FROM: bigvideo.mp4
+  TO:   Videos/bigvideo.mp4
+  WHY:  type = Video
+
+movie.mp4
+  FROM: movie.mp4
+  TO:   Videos/movie.mp4
+  WHY:  type = Video
+
+photo.png
+  FROM: photo.png
+  TO:   Images/photo.png
+  WHY:  type = Image
+────────────────────────
+3 files would be moved.
+2 folders would be created.
+No changes made.
+```
+
+`preview` is strictly read-only. It re-plans from the current rules on every call, so it always
+shows what `apply` *would* do — and it never creates a folder or moves a file.
+
+### 2. Update — mind the priority trap
+
+Rules are evaluated **top to bottom and the first match wins**, so a narrow rule added *after* a
+broad one is dead code. Adding a "big videos" exception below the general video rule looks right
+in `list`, but it never fires — rule 1 already claimed the file:
+
+```text
+chest> add type=Video && size>2MB -> Videos/HiFi
+added type=Video && size>2MB -> Videos/HiFi
+chest> preview
+...
+bigvideo.mp4
+  TO:   Videos/bigvideo.mp4     <-- still rule 1, the HiFi rule is dead
+  WHY:  type = Video
+```
+
+Fix it by re-ordering: drop the broad rule, then add the narrow one **first**.
+
+```text
+chest> rm 1
+removed rule 1 (1 remaining)
+chest> add type=Video && size>2MB -> Videos/HiFi
+chest> add type=Video -> Videos
+chest> list
+3 rule(s):
+   1. type=Image -> Images
+   2. type=Video && size>2MB -> Videos/HiFi
+   3. type=Video -> Videos
+chest> preview
+...
+bigvideo.mp4
+  TO:   Videos/HiFi/bigvideo.mp4
+  WHY:  type = Video, size > 2MB
+
+movie.mp4
+  TO:   Videos/movie.mp4
+  WHY:  type = Video
+```
+
+### 3. Update one rule in place
+
+`edit` replaces a rule while keeping its position and priority, so it never disturbs the order
+around it. Reach for it when you only want to retune one line.
+
+```text
+chest> edit 1 type=Image -> Photos/Screenshots
+replaced rule 1 type=Image -> Photos/Screenshots
+```
+
+### 4. Reuse the set
+
+Save a rule set to `~/.chest/templates` and load it into any other folder later. Templates are
+stored as TOML, so a saved rule keeps every field a built-in preset rule can carry — including
+size bounds and extension lists that the `--rule` text syntax cannot express.
+
+```text
+chest> save downloads-v2
+saved 2 rule(s) to ~/.chest/templates/downloads-v2.toml
+chest> templates
+- downloads-v2
+chest> load downloads-v2
+loaded 2 rule(s) from template 'downloads-v2'
+```
+
+`load` **replaces** the whole current rule set, and restores the priority order that was saved.
+
+### 5. Commit
+
+`apply` is the only command that moves files. It records history, so a run can be reverted with
+`chest undo`; pass `--yes` to skip the confirmation prompt in scripts.
+
+```text
+chest> apply
+3 file(s) will be moved.
+Continue? [y/N]: y
+[DONE] 3 file(s) organized into 3 folder(s).
+```
+
+Unlike `sort`, `chest repl` refuses protected system directories outright and has **no**
+`--allow-system` escape hatch.
+
+### Rule syntax cheat-sheet
+
+| Field | Aliases | Matches |
+|---|---|---|
+| `type` | | `Image`, `Video`, `Audio`, `Document`, `Archive`, `Executable`, `Code`, `Other` |
+| `extension` | `ext` | the filename extension (`extension=mp4`, `extension=.mp4`) |
+| `format` | | the content-detected format, via magic bytes first |
+| `size` | | a size such as `size>1GB`, `size<=100MB` |
+| `name` | `filename` | the filename; supports `contains`, `starts_with`, `ends_with`, `glob`, `=~regex` |
+| `date` | `modified`, `modtime` | a date or range: `>2025-01`, `=2024` |
+| `taken_date` | `takendate` | the embedded media date |
+| `mime` | `mimetype` | the detected MIME type |
+
+Destinations support the placeholders `{ext}`, `{date}`, `{year}`, `{month}` and `{day}`, and
+rules combine with `&&`. A bare pattern such as `*.mp4 -> Videos` is shorthand for matching the
+filename.
 
 ---
 

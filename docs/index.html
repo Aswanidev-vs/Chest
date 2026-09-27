@@ -242,6 +242,18 @@
 
         <div class="cmd-card">
           <div class="cmd-card-header">
+            <span class="cmd-tag">chest repl</span>
+            <i data-lucide="terminal" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc">Build a rule set interactively. <code>preview</code> re-plans from your current rules after every edit and renders the same dry-run report as <code>sort --dry-run</code> — it never touches disk. Only <code>apply</code> moves files, recorded in history and reversible with <code>chest undo</code>. Save reusable rule sets to <code>~/.chest/templates</code>.</p>
+          <div class="cmd-snippet">
+            <span>chest repl ~/Downloads -p media</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
             <span class="cmd-tag">chest search</span>
             <i data-lucide="search" style="color: var(--text-dim);"></i>
           </div>

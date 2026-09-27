@@ -13,6 +13,7 @@ type manTopic struct {
 	Description string
 	Options     []string
 	Examples    []string
+	Walkthrough []string
 	Concepts    []string
 	SeeAlso     []string
 }
@@ -37,13 +38,14 @@ registry is open: custom formats can be added programmatically.`,
 		},
 		Examples: []string{
 			"chest sort ~/Downloads               Organize downloads folder",
+			"chest repl ~/Downloads               Build sorting rules interactively with live preview",
 			"chest search \"report\" -e pdf         Search for PDF reports",
 			"chest watch ~/Downloads              Continuously watch and sort incoming files",
 			"chest undo                           Revert last file move operation",
 			"chest stats                          Display storage distribution analytics",
 			"chest man sort                       Show full manual page for sort command",
 		},
-		SeeAlso: []string{"sort", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean", "speedtest"},
+		SeeAlso: []string{"sort", "repl", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean", "speedtest"},
 	},
 	"sort": {
 		Name:     "CHEST-SORT(1) - File Organization",
@@ -95,6 +97,117 @@ Supports dry-run preview and automatic creation of destination folders.`,
 			"FORMAT RULE     In --rule, extension= matches the filename extension while format= matches the content-detected format. Example: format=pdf -> MyPdfs routes a PDF even if its extension was renamed. Custom extractors can be registered so format= understands your own file types.",
 		},
 		SeeAlso: []string{"preset", "undo", "history", "watch"},
+	},
+	"repl": {
+		Name:     "CHEST-REPL(1) - Interactive Rules Builder",
+		Synopsis: "chest repl [directory] [flags]",
+		Description: `Scans a directory once, then opens an interactive prompt for building a sort
+rule set. Rules are added, edited and previewed in a loop; the plan is recomputed
+from the current rules on every preview, so what you see is exactly what 'apply'
+would do.
+
+'preview' is strictly read-only: it renders the same dry-run report as 'sort
+--dry-run' and never touches the filesystem. Only 'apply' moves files, and it
+records history so the run can be reverted with 'chest undo'.
+
+Rule sets can be saved to and loaded from ~/.chest/templates/<name>.toml.
+Templates are stored as TOML rather than as rule strings, because rendering a
+rule back to text cannot represent every field a preset rule can carry.
+
+Protected system directories are refused outright; 'repl' has no
+--allow-system escape hatch.`,
+		Options: []string{
+			"-p, --preset <name>  Start the session with a built-in preset (downloads, media, documents, developer, photos)",
+			"-i, --into <dir>     Base destination directory for planned moves",
+			"-r, --recursive      Include subdirectories in the scan",
+			"-H, --hidden         Include hidden files and folders",
+			"-x, --exclude <list> Skip files or folders (e.g. '.git,node_modules')",
+			"-c, --collision      Collision policy: skip (default), rename, replace, abort",
+			"-y, --yes            Skip the confirmation prompt on apply",
+		},
+		Examples: []string{
+			"chest repl ~/Downloads                    Open the builder on the Downloads folder",
+			"chest repl                                Open the builder on the current directory",
+			"chest repl ~/Downloads -p media           Start from the media preset, then refine",
+			"chest repl ~/Downloads --into Sorted      Preview moves into a Sorted/ base folder",
+		},
+		Walkthrough: []string{
+			"",
+			"BUILD - start broad, then check as you go. 'preview' never touches disk.",
+			"",
+			"  chest> add type=Video -> Videos",
+			"  added type=Video -> Videos",
+			"  chest> add type=Image -> Images",
+			"  added type=Image -> Images",
+			"  chest> list",
+			"  2 rule(s):",
+			"     1. type=Video -> Videos",
+			"     2. type=Image -> Images",
+			"  chest> preview",
+			"  CHEST PLAN",
+			"  ------------------------",
+			"  bigvideo.mp4  TO: Videos/bigvideo.mp4   WHY: type = Video",
+			"  movie.mp4     TO: Videos/movie.mp4      WHY: type = Video",
+			"  photo.png     TO: Images/photo.png      WHY: type = Image",
+			"  ------------------------",
+			"  3 files would be moved.  No changes made.",
+			"",
+			"UPDATE - the priority trap. Rules are evaluated top to bottom and the FIRST",
+			"match wins, so a narrow rule added after a broad one is dead code. Here the",
+			"HiFi rule never fires, because rule 1 already claimed bigvideo.mp4:",
+			"",
+			"  chest> add type=Video && size>2MB -> Videos/HiFi",
+			"  added type=Video && size>2MB -> Videos/HiFi",
+			"  chest> preview",
+			"  bigvideo.mp4  TO: Videos/bigvideo.mp4   WHY: type = Video   <-- still rule 1",
+			"",
+			"UPDATE - fix it by re-ordering: drop the broad rule, re-add narrow first.",
+			"",
+			"  chest> rm 1",
+			"  removed rule 1 (1 remaining)",
+			"  chest> add type=Video && size>2MB -> Videos/HiFi",
+			"  chest> add type=Video -> Videos",
+			"  chest> list",
+			"  3 rule(s):",
+			"     1. type=Image -> Images",
+			"     2. type=Video && size>2MB -> Videos/HiFi",
+			"     3. type=Video -> Videos",
+			"  chest> preview",
+			"  bigvideo.mp4  TO: Videos/HiFi/bigvideo.mp4  WHY: type = Video, size > 2MB",
+			"  movie.mp4     TO: Videos/movie.mp4         WHY: type = Video",
+			"",
+			"UPDATE - change one rule in place. 'edit' keeps the rule's position and",
+			"priority, so it never disturbs the order around it.",
+			"",
+			"  chest> edit 1 type=Image -> Photos/Screenshots",
+			"  replaced rule 1 type=Image -> Photos/Screenshots",
+			"",
+			"REUSE - save the set, then load it into any other folder.",
+			"",
+			"  chest> save downloads-v2",
+			"  saved 2 rule(s) to ~/.chest/templates/downloads-v2.toml",
+			"  chest> templates",
+			"  - downloads-v2",
+			"  chest> load downloads-v2",
+			"  loaded 2 rule(s) from template 'downloads-v2'",
+			"",
+			"COMMIT - 'apply' is the only command that moves files, and it records",
+			"history so the run can be reverted with 'chest undo'.",
+			"",
+			"  chest> apply",
+			"  3 file(s) will be moved.",
+			"  Continue? [y/N]: y",
+			"  [DONE] 3 file(s) organized into 3 folder(s).",
+			"",
+		},
+		Concepts: []string{
+			"COMMANDS      add/edit/rm change the rule set, list shows it, preset loads a bundle, scan re-reads the directory, preview renders the plan read-only, apply executes it, save/load/templates manage reusable rule sets, quit leaves.",
+			"PRIORITY      Rules are evaluated top to bottom and the first match wins, so ORDER IS THE RULE. A specific rule must sit above the general one it refines; a narrow rule added below a broad rule never fires. 'edit' rewrites a rule in place without moving it, 'rm' then 'add' changes the order.",
+			"RULE ARROW    Same syntax as 'sort --rule': the left side matches, '->' names the destination folder, e.g. add type=Video && size>1GB -> Videos/Large.",
+			"SAFE PREVIEW  preview re-plans from scratch after every edit, so it always reflects the current rules. It creates no directories and moves nothing; only apply does, and only after confirmation.",
+			"TEMPLATES     Saved under ~/.chest/templates as TOML, so rules keep fields that the rule-string syntax cannot express. Names may not contain path separators.",
+		},
+		SeeAlso: []string{"sort", "preset", "undo", "history"},
 	},
 	"search": {
 		Name:     "CHEST-SEARCH(1) - Fast Multi-Core Search",
@@ -473,6 +586,14 @@ func printManPage(t manTopic) {
 				fmt.Println()
 			}
 		}
+	}
+
+	if len(t.Walkthrough) > 0 {
+		fmt.Printf("%sWALKTHROUGH%s\n", bold, reset)
+		for _, line := range t.Walkthrough {
+			fmt.Printf("    %s%s%s\n", cyan, line, reset)
+		}
+		fmt.Println()
 	}
 
 	if len(t.Concepts) > 0 {
