@@ -71,6 +71,7 @@ func Execute() {
 func init() {
 	rootCmd.Long = fmt.Sprintf("\n%s\n\nGive CHEST a folder, tell it how you want files organized, and CHEST puts them into the right compartments.\n", RenderChestLogo())
 	rootCmd.AddCommand(newSortCmd())
+	rootCmd.AddCommand(newReplCmd())
 	rootCmd.AddCommand(newSearchCmd())
 	rootCmd.AddCommand(newHistoryCmd())
 	rootCmd.AddCommand(newUndoCmd())

@@ -819,6 +819,13 @@ body::after {
   color: var(--accent-cyan);
 }
 
+.docs-article h5 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 20px 0 8px;
+  color: var(--text-dim);
+}
+
 .docs-article p {
   color: var(--text-secondary);
   font-size: 0.95rem;

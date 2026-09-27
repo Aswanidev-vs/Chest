@@ -59,6 +59,7 @@
           </div>
           <ul class="docs-nav-list">
             <li><a class="docs-nav-link" href="#cmd-sort">chest sort</a></li>
+            <li><a class="docs-nav-link" href="#cmd-repl">chest repl</a></li>
             <li><a class="docs-nav-link" href="#cmd-search">chest search</a></li>
             <li><a class="docs-nav-link" href="#cmd-watch">chest watch</a></li>
             <li><a class="docs-nav-link" href="#cmd-undo">chest undo & history</a></li>
@@ -278,6 +279,316 @@
               </tr>
             </tbody>
           </table>
+
+          <h3 id="cmd-repl">chest repl</h3>
+          <p>Build a sort rule set interactively, with a preview that re-plans after every edit. The target directory is scanned once; from then on <code>add</code>, <code>edit</code> and <code>rm</code> refine the in-memory rules while <code>preview</code> recomputes the plan from the current set and renders the same dry-run report as <code>sort --dry-run</code>. <code>preview</code> is strictly read-only — it creates no folders and moves nothing. Only <code>apply</code> executes, and it records history so the run can be reverted with <code>chest undo</code>.</p>
+          <div class="code-block-wrapper">
+            <div class="code-block">
+              <pre><code>$ chest repl ~/Downloads
+CHEST rules builder — /home/you/Downloads (128 file(s) scanned)
+Type 'help' for commands.
+chest&gt; add type=Video -&gt; Videos
+added type=Video -&gt; Videos
+chest&gt; add size&gt;1GB -&gt; Large Files
+added size&gt;1GB -&gt; Large Files
+chest&gt; preview
+CHEST PLAN
+────────────────────────
+
+movie.mkv
+  FROM: movie.mkv
+  TO:   Videos/movie.mkv
+  WHY:  type = Video
+────────────────────────
+1 files would be moved.
+No changes made.
+chest&gt; apply
+1 file(s) will be moved.
+Continue? [y/N]: y
+[DONE] 1 file(s) organized into 1 folder(s).
+chest&gt; save media-rules
+saved 2 rule(s) to /home/you/.chest/templates/media-rules.toml
+chest&gt; quit</code></pre>
+            </div>
+          </div>
+
+          <h4 style="margin-top: 24px; margin-bottom: 8px;">Prompt commands</h4>
+          <table class="flag-table">
+            <thead>
+              <tr>
+                <th>Command</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="flag-badge">help</span></td>
+                <td>List the prompt commands.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">list</span></td>
+                <td>Show the current rule set, numbered as you would type it.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">add &lt;rule&gt;</span></td>
+                <td>Add a rule using the same syntax as <code>sort --rule</code>. Rules added earlier take priority.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">edit &lt;n&gt; &lt;rule&gt;</span></td>
+                <td>Replace the 1-based rule <code>n</code>, keeping its priority.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">rm &lt;n&gt;</span></td>
+                <td>Remove the 1-based rule <code>n</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">preset [name]</span></td>
+                <td>Load a built-in preset, replacing the current rules. With no argument, list the available presets.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">scan</span></td>
+                <td>Re-read the target directory, picking up files added while the session is open.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">preview</span></td>
+                <td>Re-plan from the current rules and print the dry run. Mutates nothing.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">apply</span></td>
+                <td>Execute the current plan after a <code>[y/N]</code> confirmation (skipped with <code>--yes</code>).</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">save &lt;name&gt;</span></td>
+                <td>Save the rule set to <code>~/.chest/templates/&lt;name&gt;.toml</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">load &lt;name&gt;</span></td>
+                <td>Replace the current rules from a saved template.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">templates</span></td>
+                <td>List saved templates.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">quit</span> / <span class="flag-badge">exit</span></td>
+                <td>Leave the builder. Ctrl-D also exits.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <table class="flag-table">
+            <thead>
+              <tr>
+                <th>Flag</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="flag-badge">-p, --preset</span></td>
+                <td>string</td>
+                <td>Start the session from a built-in rule bundle: <code>downloads</code>, <code>media</code>, <code>developer</code>, <code>documents</code>, <code>photos</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-i, --into</span></td>
+                <td>string</td>
+                <td>Base destination directory that category folders are placed inside.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-r, --recursive</span></td>
+                <td>boolean</td>
+                <td>Include subdirectories in the scan.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-H, --hidden</span></td>
+                <td>boolean</td>
+                <td>Include hidden files and folders.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-x, --exclude</span></td>
+                <td>string</td>
+                <td>Skip files or folders, e.g. <code>.git,node_modules</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-c, --collision</span></td>
+                <td>string</td>
+                <td>Collision policy: <code>skip</code> (default), <code>rename</code>, <code>replace</code>, <code>abort</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">-y, --yes</span></td>
+                <td>boolean</td>
+                <td>Skip the confirmation prompt on <code>apply</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p style="margin-top: 16px;">Rules can be saved to <code>~/.chest/templates/&lt;name&gt;.toml</code> and loaded again later. Templates are stored as TOML rather than as rule strings, so a saved rule keeps every field a built-in preset rule can carry — including size bounds and extension lists that the <code>--rule</code> text syntax cannot express. Template names may not contain path separators. Unlike <code>sort</code>, <code>repl</code> refuses protected system directories outright and has no <code>--allow-system</code> escape hatch.</p>
+
+          <h4 style="margin-top: 24px; margin-bottom: 8px;">Walkthrough: build, then update</h4>
+          <p>A complete session in five steps. The directory is scanned once; from then on every command re-plans from the current rules.</p>
+
+          <h5>1. Build — start broad, check as you go</h5>
+          <div class="code-block-wrapper">
+            <div class="code-block">
+              <pre><code>$ chest repl ~/Downloads
+chest&gt; add type=Video -&gt; Videos
+added type=Video -&gt; Videos
+chest&gt; add type=Image -&gt; Images
+added type=Image -&gt; Images
+chest&gt; list
+2 rule(s):
+   1. type=Video -&gt; Videos
+   2. type=Image -&gt; Images
+chest&gt; preview
+CHEST PLAN
+────────────────────────
+
+bigvideo.mp4
+  FROM: bigvideo.mp4
+  TO:   Videos/bigvideo.mp4
+  WHY:  type = Video
+
+movie.mp4
+  FROM: movie.mp4
+  TO:   Videos/movie.mp4
+  WHY:  type = Video
+
+photo.png
+  FROM: photo.png
+  TO:   Images/photo.png
+  WHY:  type = Image
+────────────────────────
+3 files would be moved.
+2 folders would be created.
+No changes made.</code></pre>
+            </div>
+          </div>
+          <p><code>preview</code> is strictly read-only: it re-plans from the current rules on every call, so it always shows what <code>apply</code> <em>would</em> do, and it never creates a folder or moves a file.</p>
+
+          <h5>2. Update — mind the priority trap</h5>
+          <p>Rules are evaluated <strong>top to bottom and the first match wins</strong>, so a narrow rule added <em>after</em> a broad one is dead code. This looks right in <code>list</code>, but it never fires — rule 1 already claimed the file.</p>
+          <div class="code-block-wrapper">
+            <div class="code-block">
+              <pre><code>chest&gt; add type=Video &amp;&amp; size&gt;2MB -&gt; Videos/HiFi
+added type=Video &amp;&amp; size&gt;2MB -&gt; Videos/HiFi
+chest&gt; preview
+
+bigvideo.mp4
+  TO:   Videos/bigvideo.mp4     &lt;-- still rule 1, the HiFi rule is dead
+  WHY:  type = Video</code></pre>
+            </div>
+          </div>
+          <p>Fix it by re-ordering: drop the broad rule, then add the narrow one <strong>first</strong>.</p>
+          <div class="code-block-wrapper">
+            <div class="code-block">
+              <pre><code>chest&gt; rm 1
+removed rule 1 (1 remaining)
+chest&gt; add type=Video &amp;&amp; size&gt;2MB -&gt; Videos/HiFi
+chest&gt; add type=Video -&gt; Videos
+chest&gt; list
+3 rule(s):
+   1. type=Image -&gt; Images
+   2. type=Video &amp;&amp; size&gt;2MB -&gt; Videos/HiFi
+   3. type=Video -&gt; Videos
+chest&gt; preview
+
+bigvideo.mp4
+  TO:   Videos/HiFi/bigvideo.mp4
+  WHY:  type = Video, size &gt; 2MB
+
+movie.mp4
+  TO:   Videos/movie.mp4
+  WHY:  type = Video</code></pre>
+            </div>
+          </div>
+
+          <h5>3. Update one rule in place</h5>
+          <p><code>edit</code> replaces a rule while keeping its position and priority, so it never disturbs the order around it. Reach for it when you only want to retune one line.</p>
+          <div class="code-block-wrapper">
+            <div class="code-block">
+              <pre><code>chest&gt; edit 1 type=Image -&gt; Photos/Screenshots
+replaced rule 1 type=Image -&gt; Photos/Screenshots</code></pre>
+            </div>
+          </div>
+
+          <h5>4. Reuse the set</h5>
+          <div class="code-block-wrapper">
+            <div class="code-block">
+              <pre><code>chest&gt; save downloads-v2
+saved 2 rule(s) to ~/.chest/templates/downloads-v2.toml
+chest&gt; templates
+- downloads-v2
+chest&gt; load downloads-v2
+loaded 2 rule(s) from template 'downloads-v2'</code></pre>
+            </div>
+          </div>
+          <p><code>load</code> <strong>replaces</strong> the whole current rule set, and restores the priority order that was saved.</p>
+
+          <h5>5. Commit</h5>
+          <p><code>apply</code> is the only command that moves files. It records history, so the run can be reverted with <code>chest undo</code>; pass <code>--yes</code> to skip the confirmation in scripts.</p>
+          <div class="code-block-wrapper">
+            <div class="code-block">
+              <pre><code>chest&gt; apply
+3 file(s) will be moved.
+Continue? [y/N]: y
+[DONE] 3 file(s) organized into 3 folder(s).</code></pre>
+            </div>
+          </div>
+
+          <h4 style="margin-top: 24px; margin-bottom: 8px;">Rule syntax cheat-sheet</h4>
+          <table class="flag-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Aliases</th>
+                <th>Matches</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="flag-badge">type</span></td>
+                <td>—</td>
+                <td><code>Image</code>, <code>Video</code>, <code>Audio</code>, <code>Document</code>, <code>Archive</code>, <code>Executable</code>, <code>Code</code>, <code>Other</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">extension</span></td>
+                <td><code>ext</code></td>
+                <td>The filename extension, e.g. <code>extension=mp4</code> or <code>extension=.mp4</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">format</span></td>
+                <td>—</td>
+                <td>The <strong>content-detected</strong> format (magic bytes first), so a renamed file still matches.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">size</span></td>
+                <td>—</td>
+                <td>A size bound such as <code>size&gt;1GB</code> or <code>size&lt;=100MB</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">name</span></td>
+                <td><code>filename</code></td>
+                <td>The filename. Supports <code>contains</code>, <code>starts_with</code>, <code>ends_with</code>, <code>glob</code> and <code>=~regex</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">date</span></td>
+                <td><code>modified</code>, <code>modtime</code></td>
+                <td>A date or range, e.g. <code>date&gt;2025-01</code> or <code>date=2024</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">taken_date</span></td>
+                <td><code>takendate</code></td>
+                <td>The embedded media date (EXIF, QuickTime, PDF, ID3…).</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">mime</span></td>
+                <td><code>mimetype</code></td>
+                <td>The detected MIME type.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p style="margin-top: 16px;">Destinations support the placeholders <code>{ext}</code>, <code>{date}</code>, <code>{year}</code>, <code>{month}</code> and <code>{day}</code>, and clauses combine with <code>&amp;&amp;</code>. A bare pattern such as <code>*.mp4 -&gt; Videos</code> is shorthand for matching the filename. The <code>type</code> values are exactly the eight category names; anything else simply never matches.</p>
 
           <h3 id="cmd-search">chest search</h3>
           <p>Ultra-fast filesystem search using <code>fastwalk</code> for parallel multi-core directory traversal and the <code>fzf</code> algorithm for scoring. Patterns match fuzzily by default (switch to exact substring with <code>-x</code> or regular expressions with <code>-r</code>), and filters can be freely combined: file category, extension, size, modification date, and streaming content grep that reports line numbers and snippets. Results are color-coded by category, or emitted as JSON for scripting.</p>
