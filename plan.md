@@ -232,4 +232,208 @@ Beyond the proposed list, the codebase review surfaced these grounded opportunit
 
 ---
 
-*Document generated from a read-only analysis of the CHEST codebase (rules/planner/organizer, CLI/plugin surface, history/indexer/metadata/watcher layers). No source code was modified. Key files referenced: `internal/rules/engine.go`, `internal/planner/planner.go`, `internal/cli/sort.go`, `internal/cli/watch.go`, `internal/watcher/watcher.go`, `internal/history/history.go`, `internal/indexer/indexer.go`, `internal/metadata/*`, `internal/plugin/*`, `internal/presets/*`.*
+## 7. Data-Loss Defect in `sort` — Analysis & Fix Plan
+
+> **STATUS: PROPOSAL ONLY — NOT IMPLEMENTED.**
+> This section records a data-loss defect reproduced against the current code, plus a plan to
+> fix it. **No source code has been changed for this item.** Everything below is design work to
+> be carried out later. The decisions recorded in §7.3 have been *made*, but nothing has been
+> built. Section 7.4 is still open and unanswered.
+
+### 7.0 The defect (reproduced)
+
+Two files with the same name in different subfolders, both routed to the same destination,
+using **default settings**:
+
+```text
+before:  sub1/photo.jpg = "PHOTO-ONE-original"
+         sub2/photo.jpg = "PHOTO-TWO-original"
+
+$ chest sort . -r --rule "ext=jpg -> Images" --dry-run
+   → plans BOTH files to Images/photo.jpg, no collision warning
+
+$ chest sort . -r --rule "ext=jpg -> Images" -y     # default policy: skip
+   → "[DONE] 2 files organized into 1 folders."
+
+after:   Images/photo.jpg = "PHOTO-TWO-original"
+         PHOTO-ONE-original  << LOST
+```
+
+`Planner.Plan` checks `filesystem.Exists(targetFile)` against what is on disk *at plan time*.
+Two different sources can resolve to the same path, and nothing de-duplicates them, so the second
+move clobbers the first. `skip` did not skip, because at plan time neither file existed.
+
+Verified as **format-agnostic** — the same loss occurs for non-image rules:
+
+```text
+$ chest sort . -r --rule "ext=md -> Docs" -y
+   → Docs/notes.md => "beta text"   ("alpha text" destroyed)
+```
+
+Note the tool also reported "3 files organized" while only 2 files existed at the destination.
+
+**Undo makes it worse.** Today both operations record the same destination, so `undo` restores
+the first (consuming `Images/photo.jpg` entirely) and then fails on the second because the
+source no longer exists:
+
+```text
+$ chest undo
+Error: undo failed: ... open ...\Images\photo.jpg: The system cannot find the file specified.
+
+final state:  sub1/photo.jpg => "PHOTO-TWO-original"   (wrong content, wrong folder)
+               PHOTO-ONE-original                      << unrecoverable
+```
+
+The history entry is still marked `Complete`, which is what makes the corruption invisible.
+This breaks the tool's headline "Completely Reversible" claim.
+
+### 7.1 Why SHA-256 is not the fix
+
+> *Original suggestion: when two files share a name but differ in content, use the SHA-256 to
+> tell them apart. The instinct is sound; the placement is not.*
+
+**The conflict is structural, not content-based.** Two sources resolving to one destination is
+detectable with zero I/O, inside the loop `Plan` already runs — a `map[string]Operation` keyed
+on the resolved target path. Roughly five lines, no disk reads, no performance cost.
+
+Hashing would tell you the two files *differ*. It cannot tell you **which one should win** —
+that still requires a naming or placement policy. So hashing answers a question we did not ask
+while leaving the actual question open.
+
+There is also a cost problem. Making `sort` SHA-256 every file means reading every byte of the
+whole tree. The indexer gates hashing behind `--hash` for exactly this reason. `sort`'s entire
+value proposition is speed — it has progress bars and a "Parallel Microsecond Engine" pitch.
+Hash-everything would wreck that to fix a bug that needs no hashing.
+
+**Where the idea should go — the key refinement.** Hash only the files that are *already in
+conflict*, not the whole tree. In a typical run conflicts number between 0 and roughly 20
+files; hashing 20 files is imperceptible. The indexer already ships a `hashFile` helper and
+stores hashes under `--hash`, so the plumbing exists.
+
+That yields the real distinction:
+
+| Situation | Meaning | Right action |
+|---|---|---|
+| Same name, **same hash** | Genuine duplicate | Second copy is redundant — safe to auto-skip |
+| Same name, **different hash** | Distinct content | **Both must be preserved** — needs disambiguation |
+
+This is a meaningful improvement over today's behaviour, where both cases are handled
+identically: silently destroyed.
+
+### 7.2 The plan, staged
+
+**Stage 0 — stop the data loss (the actual bug fix).**
+In `Plan`, track claimed destinations. When a second file resolves to an already-claimed path it
+is not planned as a clean operation; it becomes a recorded conflict on `models.Plan`. Under the
+default `skip` policy it is not moved at all, and the default *is* `skip`, so this alone ends the
+silent overwrite. `abort` errors out; `rename` uses the existing `ResolveCollision`; `replace`
+keeps current behaviour but gets an explicit warning.
+
+**Stage 1 — surface it where you can act on it.**
+`--dry-run` and the REPL's `preview` show conflicts as a first-class block, not a footnote:
+
+```text
+!! CONFLICT — 2 files resolve to Images/photo.jpg
+    sub1/photo.jpg
+    sub2/photo.jpg
+  policy 'skip' → sub2/photo.jpg will be LEFT IN PLACE
+```
+
+Today the dry run is where this would be caught, and it shows nothing. That is the part that
+makes the tool untrustworthy.
+
+**Stage 2 — make `undo` atomic (the second bug).**
+Two-phase: validate that every file in the batch can be restored (sources present, destinations
+writable, nothing blocking) and only then execute. If validation fails, refuse the whole undo
+with a precise reason instead of half-restoring. Mark the history entry `Failed`/`Partial`
+rather than leaving it `Complete`, which is what makes the corruption invisible today.
+Validate-then-execute is preferred over rollback-on-failure, because once three files are
+restored the destinations are occupied and rolling forward gets messy.
+
+**Stage 3 — optional content-aware disambiguation.**
+Consult the index for hashes of the *conflicting subset only*. Same hash → true duplicate →
+auto-skip. Different hash → distinct → apply the chosen naming policy. Never hash the full tree.
+Gate behind an explicit flag such as `--hash-collisions` so the fast path stays the default.
+
+**One trap in Stage 0.** A naive `map[string]` keyed on the raw path is incomplete on Windows and
+macOS. `sub1/Photo.jpg` and `sub2/photo.jpg` produce different map keys but the same file on a
+case-insensitive filesystem, and `Exists` returns false for both at plan time, so nothing catches
+it. The map key must be normalised (lowercased on case-insensitive platforms) or the same
+data-loss bug survives in a subtler form.
+
+**What we will not do.**
+- No whole-tree hashing (severe performance regression)
+- No silent deletion of anything
+- No changing `replace` semantics without an explicit opt-in — arguably `replace` should require
+  a deliberate flag such as `--allow-overwrite`, since today it destroys without asking
+- No auto-renaming the user did not opt into
+
+**How we would prove it.** Regression test on the exact fixture above: two same-named files with
+different content → assert both survive and the dry run reports the conflict. Then the markdown
+variant (format-agnostic), the case-insensitive variant (`Photo.jpg` vs `photo.jpg`), a
+true-duplicate case (same hash → auto-skip), and a test that `undo` either fully restores or fully
+refuses — never partially. Plus the existing suite and `-race`, since `Plan` is on the hot path
+for every command.
+
+### 7.3 Decisions taken, and what they simplify
+
+**Decided:** auto-rename the conflicting file (rather than skip / keep-source-folder / abort), and
+**no SHA-256 involvement** in conflict policy.
+
+Dropping hashing removes Stage 3 from the critical path. Good — the fix becomes cheap. But
+**auto-rename cannot be done by just calling `ResolveCollision`**, and this is the trap:
+
+```text
+op1 claims  Images/photo.jpg      <- in the plan, not yet on disk
+op2 wants   Images/photo.jpg
+  → ResolveCollision checks Exists(Images/photo.jpg) → FALSE (nothing written yet)
+  → returns Images/photo.jpg unchanged
+  → both ops still target the same path
+```
+
+`ResolveCollision` (`internal/filesystem/fs.go:92`) produces `photo (1).jpg`, but it is
+**disk-aware only** — it short-circuits on `!Exists(dst)` before ever considering a counter. The
+planner must carry the set of paths already claimed in this plan and feed that into resolution,
+so op2 becomes `Images/photo (1).jpg`. Same helper, but it needs in-plan awareness as an input.
+
+**A useful consequence.** Auto-rename also fixes the undo corruption in this scenario, as a side
+effect. With distinct destinations — `Images/photo.jpg` and `Images/photo (1).jpg` — each restore
+is independent and both succeed. The data loss and the broken undo both disappear for this class
+of bug.
+
+So the undo hardening drops from "critical" to "robustness": still worth doing, because a
+genuinely missing file, a permission error, or a full disk can half-restore a batch by the same
+mechanism. It just stops being a live data-loss path for this scenario.
+
+**The finalized plan.**
+
+1. **Detect intra-plan conflicts** — track claimed destinations in `Plan`. Normalise the key by
+   case on case-insensitive platforms, or `Photo.jpg` vs `photo.jpg` slips through and the same
+   bug survives in subtler form. On conflict, resolve against the union of on-disk and in-plan
+   claims, producing `photo (1).jpg`, and record it on `models.Plan` so it can be reported.
+2. **Report it in `--dry-run` and the REPL's `preview`** — auto-rename is non-obvious; the user
+   should see `photo (1).jpg` appear with a marker, not have it surprise them. Same in
+   `printDryRun`.
+3. **Harden `undo`** — validate the whole batch is restorable before restoring any of it; refuse
+   cleanly otherwise. Mark the history entry `Failed`/`Partial` rather than leaving it
+   `Complete`.
+
+### 7.4 Open question (unanswered — decide before implementing)
+
+Auto-rename was chosen as the **default**. What should happen when someone *explicitly* passes
+`--collision skip`?
+
+Recommended: standard precedence — **an explicit flag beats the default**.
+
+| Invocation | Behaviour |
+|---|---|
+| No flag given | intra-plan conflict auto-renames (the chosen default) |
+| `--collision skip` | the second file is left in place, reported as a conflict |
+| `--collision abort` | the run stops before moving anything |
+
+This keeps the default safe and convenient while still honouring a deliberate instruction. The
+cost is that `skip` no longer means "nothing moves" in every case, which is the right trade.
+
+---
+
+*Document generated from a read-only analysis of the CHEST codebase (rules/planner/organizer, CLI/plugin surface, history/indexer/metadata/watcher layers). Key files referenced: `internal/rules/engine.go`, `internal/planner/planner.go`, `internal/cli/sort.go`, `internal/cli/watch.go`, `internal/watcher/watcher.go`, `internal/history/history.go`, `internal/indexer/indexer.go`, `internal/metadata/*`, `internal/plugin/*`, `internal/presets/*`.*
