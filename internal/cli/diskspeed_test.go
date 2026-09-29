@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,16 @@ func TestPrintSpeedTableIncludesDisk(t *testing.T) {
 	}
 }
 
+func TestPrintSpeedTableDiskOnlySubtitle(t *testing.T) {
+	rows := []speedResult{{label: "Disk read", ok: true, detail: "1240.55 MB/s"}}
+	var b bytes.Buffer
+	printSpeedTable(&b, rows)
+	out := b.String()
+	if !strings.Contains(out, "Disk") || strings.Contains(out, "Network + Disk") || strings.Contains(out, "Ookla vs Cloudflare") {
+		t.Fatalf("disk-only table has wrong subtitle:\n%s", out)
+	}
+}
+
 // TestDirectBufferAligned verifies newAlignedBuf returns a view whose start
 // address is aligned, which FILE_FLAG_NO_BUFFERING and O_DIRECT require.
 func TestDirectBufferAligned(t *testing.T) {
@@ -84,13 +95,36 @@ func TestDirectBufferAligned(t *testing.T) {
 
 func alignUp(addr, align uintptr) uintptr { return (addr + align - 1) &^ (align - 1) }
 
+func TestDiskSeqReadResetsAfterWarmup(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "read-bench-*.bin")
+	if err != nil {
+		t.Fatalf("create benchmark file: %v", err)
+	}
+	defer f.Close()
+
+	const total = 4 << 20
+	if err := f.Truncate(2 * total); err != nil {
+		t.Fatalf("extend benchmark file: %v", err)
+	}
+	if _, err := diskSeqRead(f, total, make([]byte, diskBlockSize)); err != nil {
+		t.Fatalf("diskSeqRead: %v", err)
+	}
+	off, err := f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		t.Fatalf("current offset: %v", err)
+	}
+	if off != total {
+		t.Fatalf("offset after timed read = %d, want %d", off, total)
+	}
+}
+
 // TestDiskBenchSmall runs the real benchmark helpers on a tiny file in a
 // temporary dir. It asserts the helpers complete and report sane positive
 // throughput without panicking and without leaking the test file.
 func TestDiskBenchSmall(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bench.bin")
-	const total = 4 << 20 // 4 MiB: warm-up writes 2 MiB, measured 4 MiB
+	const total = 4 << 20 // 4 MiB: warm-up writes 2 MiB, then measured writes replace 4 MiB
 
 	// Open the file the same way runDisk does, falling back to buffered I/O
 	// on platforms without direct I/O, so the test works everywhere.
@@ -109,6 +143,13 @@ func TestDiskBenchSmall(t *testing.T) {
 	}
 	if w <= 0 {
 		t.Fatalf("seq write MB/s = %v, want > 0", w)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatalf("stat benchmark file: %v", err)
+	}
+	if info.Size() != total {
+		t.Fatalf("benchmark file size = %d, want %d", info.Size(), total)
 	}
 	f.Close()
 
@@ -133,7 +174,10 @@ func TestDiskBenchSmall(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer wf.Close()
-	w4k, r4k := diskRandom4K(wf, total, newAlignedBuf(disk4KSize, directSector()), int64(directSector()))
+	w4k, r4k, err := diskRandom4K(wf, total, newAlignedBuf(disk4KSize, directSector()), int64(directSector()))
+	if err != nil {
+		t.Fatalf("random 4K write: %v", err)
+	}
 	if w4k <= 0 {
 		t.Fatalf("4K write IOPS = %v, want > 0", w4k)
 	}
