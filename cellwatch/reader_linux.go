@@ -141,7 +141,7 @@ func (linuxReader) Read() (Status, error) {
 	// as a stand-in for "unknown". Believing that sentinel would report a pack
 	// as four billion cycles old, which is a plausible-looking number rather
 	// than an obvious failure.
-	if c, ok := readAttrInt(dir, "cycle_count"); ok && c >= 0 && c < maxReportedCycles {
+	if c, ok := readAttrInt(dir, "cycle_count"); ok && c >= 0 && c <= math.MaxInt && c < maxReportedCycles {
 		s.Cycles = int(c)
 		s.CyclesKnown = true
 		s.Cap |= CapCycleCount
