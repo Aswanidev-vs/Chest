@@ -108,6 +108,7 @@ func newCleanCmd() *cobra.Command {
 	var (
 		purgeAll     bool
 		clearHistory bool
+		purgeBattery bool
 		yes          bool
 	)
 
@@ -172,14 +173,49 @@ func newCleanCmd() *cobra.Command {
 				fmt.Println("\x1b[1;38;5;82m✔ Cleared undo history (~/.chest/history.json).\x1b[0m")
 			}
 
+			// Battery history is opt-in to delete, and deliberately not implied
+			// by --all. The file index is a cache that the next command rebuilds
+			// in seconds; recorded battery history is months of measurement that
+			// nothing can recreate. A destructive flag has to name the thing it
+			// destroys rather than sweeping it up behind a word like "all".
+			if purgeBattery {
+				if !yes {
+					fmt.Printf("\x1b[1;38;5;214m⚠ This will permanently delete %s, which holds recorded battery history that cannot be recovered.\x1b[0m\n\nContinue? [y/N]: ", batteryDBPath())
+					reader := bufio.NewReader(os.Stdin)
+					resp, _ := reader.ReadString('\n')
+					if resp := strings.TrimSpace(strings.ToLower(resp)); resp != "y" && resp != "yes" {
+						fmt.Println("Operation aborted.")
+						return nil
+					}
+				}
+				// A machine that never recorded anything has no file to remove,
+				// and that is a success rather than something to report as an
+				// error the user has to think about.
+				if err := os.Remove(batteryDBPath()); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("failed removing battery history: %w", err)
+				}
+				fmt.Println("\x1b[1;38;5;82m✔ Deleted recorded battery history.\x1b[0m")
+			}
+
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&purgeAll, "all", false, "Completely delete the ~/.chest/index.db database file")
 	cmd.Flags().BoolVar(&clearHistory, "history", false, "Also delete the undo history file (~/.chest/history.json)")
+	cmd.Flags().BoolVar(&purgeBattery, "battery", false, "Also delete recorded battery history (~/.chest/battery.db); not implied by --all")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
 	return cmd
+}
+
+// batteryDBPath is the single place the history file's location is decided, so
+// the command that writes it and the command that deletes it cannot disagree.
+func batteryDBPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, ".chest", "battery.db")
 }
 
 func newStatsCmd() *cobra.Command {

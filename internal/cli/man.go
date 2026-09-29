@@ -45,7 +45,7 @@ registry is open: custom formats can be added programmatically.`,
 			"chest stats                          Display storage distribution analytics",
 			"chest man sort                       Show full manual page for sort command",
 		},
-		SeeAlso: []string{"sort", "repl", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean", "speedtest"},
+		SeeAlso: []string{"sort", "repl", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean", "speedtest", "battery"},
 	},
 	"sort": {
 		Name:     "CHEST-SORT(1) - File Organization",
@@ -499,6 +499,53 @@ Use --ookla or --cloudflare to run only one. Use --json for machine output.`,
 			"chest speedtest --json                Machine-readable JSON output",
 		},
 		SeeAlso: []string{"update", "man"},
+	},
+	"battery": {
+		Name:     "CHEST-BATTERY(1) - Battery Monitoring",
+		Synopsis: "chest battery [flags]",
+		Description: `Read battery state from the operating system and report it.
+
+MEASURED versus ESTIMATED matters more here than in most commands, and the two
+are never mixed:
+  - Charge percentage, mains state, time remaining, capacity and health are
+    measured, wherever the platform reports them. A field the platform cannot
+    supply is omitted rather than shown as zero.
+  - Drain rate is an ESTIMATE derived from change in charge over a window, and
+    is only produced when the window is long enough to mean something. Battery
+    charge is reported in whole percentage points, so a window shorter than the
+    platform's quantum is refused rather than answered with a confident number.
+
+PLATFORM SUPPORT
+  Windows  GetSystemPowerStatus: charge, mains state, time remaining.
+  Linux    /sys/class/power_supply: the above plus wattage, capacity, health,
+           cycles and temperature where the driver exposes them.
+  macOS    ioreg AppleSmartBattery: the richest of the three.
+
+  Windows reports no wattage, capacity or cycle count through the unprivileged
+  path. Those rows are omitted, not zero-filled, and the report names what the
+  platform did not supply.
+
+No platform reports per-application battery use to an unprivileged process, so
+this command does not attempt to.`,
+		Options: []string{
+			"--record               Append each reading to the battery history database",
+			"--seconds <duration>   Measure over this long instead of taking a single reading",
+			"--interval <duration>  Sampling interval while measuring (default 2s)",
+			"--json                 Output as machine-readable JSON",
+			"--low <pct>            Report charge at or below this percentage as low",
+			"--fail-under <pct>     Exit 3 when charge is at or below this percentage",
+			"--db <path>            Path to the history database (default ~/.chest/battery.db)",
+			"-h, --help             Show brief CLI help",
+		},
+		Examples: []string{
+			"chest battery                          One reading: charge, power state, time left",
+			"chest battery --json                   Machine-readable output",
+			"chest battery --seconds 10m            Measure a real drain rate over ten minutes",
+			"chest battery --record --seconds 1h    Record an hour of readings to history",
+			"chest battery --low 20                 Mark charge at or below 20% as low",
+			"chest battery --fail-under 15          Exit 3 when charge is at or below 15%",
+		},
+		SeeAlso: []string{"speedtest", "clean", "man"},
 	},
 }
 
