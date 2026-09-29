@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -63,6 +64,13 @@ func detectFlagTypos(cmd *cobra.Command, rawArgs []string) error {
 // Execute runs the root CLI command
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		// A thresholdError is a successful measurement that met a bound, not a
+		// failure, so it exits 3 rather than 1. That lets a script distinguish
+		// "the battery is low" from "the command could not run".
+		var th thresholdError
+		if errors.As(err, &th) {
+			os.Exit(3)
+		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -88,4 +96,5 @@ func init() {
 	rootCmd.AddCommand(newManCmd())
 	rootCmd.AddCommand(newUpdateCmd())
 	rootCmd.AddCommand(newSpeedtestCmd())
+	rootCmd.AddCommand(newBatteryCmd())
 }

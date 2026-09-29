@@ -45,7 +45,7 @@ registry is open: custom formats can be added programmatically.`,
 			"chest stats                          Display storage distribution analytics",
 			"chest man sort                       Show full manual page for sort command",
 		},
-		SeeAlso: []string{"sort", "repl", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean", "speedtest"},
+		SeeAlso: []string{"sort", "repl", "search", "watch", "history", "undo", "index", "stats", "duplicates", "analyze", "completion", "plugin", "clean", "speedtest", "battery"},
 	},
 	"sort": {
 		Name:     "CHEST-SORT(1) - File Organization",
@@ -499,6 +499,80 @@ Use --ookla or --cloudflare to run only one. Use --json for machine output.`,
 			"chest speedtest --json                Machine-readable JSON output",
 		},
 		SeeAlso: []string{"update", "man"},
+	},
+	"battery": {
+		Name:     "CHEST-BATTERY(1) - Battery Monitoring",
+		Synopsis: "chest battery [flags]",
+		Description: `Read battery state from the operating system and report it.
+
+MEASURED versus ESTIMATED matters more here than in most commands, and the two
+are never mixed:
+  - Charge percentage, mains state, time remaining, capacity, health and cycle
+    count are measured, wherever the platform reports them. A field the platform
+    cannot supply is omitted rather than shown as zero.
+  - Drain rate is an ESTIMATE derived from change in charge over a window, and
+    is only produced when the window is long enough to mean something. Battery
+    charge is reported in whole percentage points, so a window shorter than the
+    platform's quantum is refused rather than answered with a confident number.
+
+PLATFORM SUPPORT
+  Windows  GetSystemPowerStatus for charge, mains state and the OS time
+           estimate, plus the battery class driver (IOCTL_BATTERY_QUERY_INFORMATION
+           and IOCTL_BATTERY_QUERY_STATUS) for cycle count, full and design
+           capacity, health, wattage, voltage and present charge. The driver is
+           read unprivileged; no elevation is required.
+  Linux    /sys/class/power_supply: the above plus temperature where the driver
+           exposes it.
+  macOS    ioreg AppleSmartBattery.
+
+  Where the firmware declines to estimate a time remaining, one is derived from
+  the driver's present capacity over its present rate, and only while discharging.
+
+HISTORY
+  Readings are appended to ~/.chest/battery.db with --record. That file is
+  deliberately separate from the file index, so 'chest clean --all' cannot
+  destroy it. 'chest clean --battery' clears it, and is never implied by --all.
+
+  Period reports are cut in UTC, and each one states its coverage. A range in
+  which the sampler ran for two hours is reported as such rather than presented
+  as a description of the month.
+
+  Per-application figures are ESTIMATES apportioned from measured CPU and I/O
+  activity. No platform reports per-application battery use to an unprivileged
+  process, so this command does not claim to. A lit display, a wireless radio
+  and thermal management draw real power at near-zero CPU and are invisible to
+  this method.`,
+		Options: []string{
+			"--record               Append each reading to the battery history database",
+			"--seconds <duration>   Measure over this long instead of taking a single reading",
+			"--realtime             Redraw the reading in place until Ctrl+C",
+			"--daemon               Keep recording in the foreground until Ctrl+C",
+			"--interval <duration>  Sampling interval while measuring (default 2s)",
+			"--json                 Output as machine-readable JSON",
+			"--low <pct>            Report charge at or below this percentage as low",
+			"--fail-under <pct>     Exit 3 when charge is at or below this percentage",
+			"--apps                 Per-application activity apportioned from CPU and I/O (ESTIMATE)",
+			"--top <n>              How many applications to list with --apps (default 5)",
+			"--day                  Report the current UTC day from history",
+			"--week                 Report the current ISO week from history",
+			"--month                Report the current calendar month from history",
+			"--year                 Report the current calendar year from history",
+			"--db <path>            Path to the history database (default ~/.chest/battery.db)",
+			"-h, --help             Show brief CLI help",
+		},
+		Examples: []string{
+			"chest battery                          One reading: charge, power state, time left",
+			"chest battery --json                   Machine-readable output",
+			"chest battery --realtime               Live reading, redrawn in place",
+			"chest battery --seconds 10m            Measure a real drain rate over ten minutes",
+			"chest battery --record --seconds 1h    Record an hour of readings to history",
+			"chest battery --record --daemon        Record until Ctrl+C, then report with --day",
+			"chest battery --day --apps             Today, with per-application activity",
+			"chest battery --week --top 10          This ISO week, ten applications",
+			"chest battery --low 20                 Mark charge at or below 20% as low",
+			"chest battery --fail-under 15          Exit 3 when charge is at or below 15%",
+		},
+		SeeAlso: []string{"speedtest", "clean", "watch", "man"},
 	},
 }
 
