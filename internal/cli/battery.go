@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/Aswanidev-vs/chest/cellwatch"
 	"github.com/spf13/cobra"
@@ -35,6 +38,7 @@ func newBatteryCmd() *cobra.Command {
 		apps      bool
 		top       int
 		daemon    bool
+		realtime  bool
 
 		// Period flags are collected separately and resolved once, so a
 		// combination of them is reported as a usage error instead of one
@@ -79,9 +83,9 @@ func newBatteryCmd() *cobra.Command {
 What is measured and what is estimated matters more here than in most commands,
 so the two are never mixed:
 
-  MEASURED  Charge percentage, mains state, time remaining, capacity and health,
-            wherever the platform reports them. A field the platform cannot
-            supply is omitted rather than shown as zero.
+  MEASURED  Charge percentage, mains state, time remaining, capacity, health and
+            cycle count, wherever the platform reports them. A field the platform
+            cannot supply is omitted rather than shown as zero.
 
   ESTIMATED Drain rate, when the platform exposes no wattage. It is derived from
             change in charge over a window, and the window must be long: battery
@@ -93,25 +97,29 @@ No platform reports true per-application battery use to an unprivileged
 process, so this command does not claim to. Per-app figures, where present, are
 apportioned from measured CPU and I/O activity and are labelled ESTIMATE.
 
-Use --record to append readings to a history database, --seconds to measure
-over a window rather than take a single reading, and --json for
-machine-readable output.
+Use --record to append readings to a history database, --realtime to watch the
+reading change in place, --seconds to measure over a window rather than take a
+single reading, and --json for machine-readable output.
 
-HISTORY reads what --record has written:
+HISTORY reads what --record has written, into its own database at
+~/.chest/battery.db. Periods are cut in UTC:
 
   chest battery --day            charge and drain for today
   chest battery --week           the current ISO week
   chest battery --month          the current calendar month
   chest battery --year           the current calendar year
-  chest battery --month --apps   with per-application attribution
+  chest battery --month --apps   with per-application attribution and a bar
+                                 chart of activity over the period
 
 A historical report states its coverage. A range in which the sampler ran for
 two hours is reported as such rather than presented as a description of the
 month.`,
 		Example: `  chest battery
   chest battery --json
+  chest battery --realtime
   chest battery --seconds 600
   chest battery --record --apps
+  chest battery --record --daemon
   chest battery --week --apps
   chest battery --low 20`,
 		Args: cobra.NoArgs,
@@ -134,6 +142,17 @@ month.`,
 			// present in answer to a question about the past.
 			if period != cellwatch.PeriodAll {
 				return batteryHistory(cmd, period, apps, top, jsonOut, dbPath)
+			}
+
+			// --realtime redraws a single reading in place until interrupted. It
+			// is refused alongside --seconds because that flag already owns the
+			// "measure over a window" answer, and two of them would be two
+			// different renderings of one run.
+			if realtime {
+				if seconds > 0 {
+					return errors.New("--realtime and --seconds both define a window; use one")
+				}
+				return batteryRealtime(cmd, reader, interval, record, apps, dbPath, jsonOut, failUnder)
 			}
 
 			// A daemon records until stopped. It is started deliberately and not
@@ -280,6 +299,7 @@ month.`,
 	cmd.Flags().BoolVar(&apps, "apps", false, "Report per-application activity apportioned from CPU and I/O (ESTIMATE)")
 	cmd.Flags().IntVar(&top, "top", 5, "How many applications to list with --apps")
 	cmd.Flags().BoolVar(&daemon, "daemon", false, "Keep recording in the foreground until Ctrl+C")
+	cmd.Flags().BoolVar(&realtime, "realtime", false, "Redraw the reading in place until Ctrl+C")
 
 	// The period flags are mutually exclusive rather than cumulative, because
 	// "this week and this month" has no single sensible answer and picking one
@@ -602,6 +622,178 @@ func missingCapabilities(got cellwatch.Capability) string {
 		}
 	}
 	return strings.Join(names, ", ")
+}
+
+// batteryRealtime redraws one reading in place until interrupted.
+//
+// It reuses buildBatteryRows rather than a second formatting path, so the live
+// view and the single-shot table cannot drift apart: a figure that appears in
+// one appears in the other with the same label, the same colour and the same
+// estimate marker.
+//
+// Redrawing is only attempted on a terminal. Piped to a file, the readings are
+// appended one per line instead, because writing cursor-control sequences into
+// a log produces a file no one can read.
+func batteryRealtime(cmd *cobra.Command, reader cellwatch.Reader, interval time.Duration,
+	record, apps bool, dbPath string, jsonOut bool, failUnder int) error {
+
+	ctx, cancel := context.WithCancel(cmd.Context())
+	defer cancel()
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
+	go func() {
+		<-sig
+		cancel()
+	}()
+
+	live := isTerminal(os.Stdout)
+
+	var store cellwatch.Store
+	if record {
+		var err error
+		store, err = cellwatch.Open(dbPath)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+	}
+
+	var attributor *cellwatch.Attributor
+	if apps {
+		attributor = cellwatch.NewAttributor()
+		_ = attributor.Sample()
+	}
+
+	out := cmd.OutOrStdout()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// A rate needs a window, and the first tick has not happened yet, so the
+	// estimator is fed every reading and its own window governs when a rate
+	// becomes reportable. The same rules apply as for --seconds.
+	est := cellwatch.NewRateEstimator(interval)
+
+	var last cellwatch.Status
+	first := true
+	for {
+		st, err := reader.Read()
+		if err != nil {
+			if first {
+				return err
+			}
+			// A failed read is not fatal once something has been displayed: the
+			// previous reading is still the most recent true one.
+			select {
+			case <-ctx.Done():
+				return batteryExit(last, failUnder)
+			case <-ticker.C:
+				continue
+			}
+		}
+		last = st
+		est.Add(cellwatch.Sample{At: time.Now(), Pct: st.ChargePct, AC: st.AC, Charge: st.IsCharging()})
+		if store != nil {
+			if err := store.Record(ctx, st); err != nil {
+				return fmt.Errorf("recording: %w", err)
+			}
+		}
+		if attributor != nil && store != nil {
+			if err := attributor.Sample(); err == nil {
+				attributed := attributor.Attribute(est.Rate().PctPerHour)
+				if !attributed.Idle && len(attributed.Apps) > 0 {
+					if err := store.Apps(ctx, time.Now(), attributed.Apps); err != nil {
+						return fmt.Errorf("recording apps: %w", err)
+					}
+				}
+			}
+		}
+
+		if jsonOut {
+			// JSON has no cursor addressing, so a live JSON stream is newline
+			// delimited rather than redrawn. Each object is a complete reading.
+			if err := emitBattery(out, st, est.Rate(), 0, true); err != nil {
+				return err
+			}
+		} else if live {
+			printBatteryLive(out, st, est.Rate(), first)
+		} else {
+			printBatteryTable(out, st, est.Rate(), 0)
+		}
+		first = false
+
+		select {
+		case <-ctx.Done():
+			// The live view leaves the cursor mid-screen, so a final newline is
+			// needed or the shell prompt is drawn over the last reading.
+			if live && !jsonOut {
+				fmt.Fprintln(out)
+			}
+			return batteryExit(last, failUnder)
+		case <-ticker.C:
+		}
+	}
+}
+
+// printBatteryLive draws the reading over the previous one.
+//
+// The previous frame is erased by moving the cursor up and clearing each line
+// rather than by clearing the screen, so a reading that is one row shorter than
+// its predecessor cannot leave a stale line behind.
+func printBatteryLive(w io.Writer, s cellwatch.Status, r cellwatch.Rate, first bool) {
+	rows := buildBatteryRows(s, r, 0)
+	var b strings.Builder
+
+	// A frame occupies one line per row plus a two-line footer, and the cursor
+	// is left on the last of them. The next frame therefore rewinds exactly that
+	// many lines and rewrites them.
+	//
+	// The clear and the content are emitted in the same pass rather than as a
+	// separate clearing sweep. Clearing first would emit a newline per line
+	// before the content, so the cursor would end up further down than the
+	// rewind count accounts for and the frame would creep down the screen on
+	// every refresh.
+	const footerLines = 2
+	lines := len(rows) + footerLines
+	if !first {
+		fmt.Fprintf(&b, "\x1b[%dA", lines)
+	}
+
+	// Clearing to end of line handles a row that shrank between frames.
+	emit := func(format string, args ...any) {
+		b.WriteString("\x1b[2K")
+		fmt.Fprintf(&b, format, args...)
+		b.WriteString("\n")
+	}
+	for _, row := range rows {
+		colour := chestDim
+		switch {
+		case strings.Contains(row.Value, "LOW"), row.Value == "none detected":
+			colour = chestRed
+		case row.Estimate:
+			colour = chestCyan
+		default:
+			colour = chestPrimary
+		}
+		emit("%s%-16s%s %s%-28s%s %s%s%s",
+			chestDim, row.Label, chestReset, colour, row.Value, chestReset,
+			chestDim, row.Detail, chestReset)
+	}
+	emit("  %supdating every %s · Ctrl+C to stop%s", chestDim, "…", chestReset)
+	fmt.Fprint(w, b.String())
+	fmt.Fprintf(w, "  %s%s%s", chestDim, time.Now().Format("15:04:05"), chestReset)
+}
+
+// isTerminal reports whether f is an interactive terminal, using the same
+// detection as the progress bar so that piped output stays clean everywhere in
+// the project rather than only in the commands that happen to check.
+func isTerminal(f *os.File) bool {
+	if f == nil {
+		return false
+	}
+	_, _, err := term.GetSize(int(f.Fd()))
+	return err == nil
 }
 
 // printBatteryTable renders the report in the same style as printSpeedTable:

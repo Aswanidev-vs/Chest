@@ -66,6 +66,7 @@
             <li><a class="docs-nav-link" href="#cmd-index">chest index & clean</a></li>
             <li><a class="docs-nav-link" href="#cmd-intel">stats, dupes & analyze</a></li>
             <li><a class="docs-nav-link" href="#cmd-speedtest">chest speedtest</a></li>
+            <li><a class="docs-nav-link" href="#cmd-battery">chest battery</a></li>
             <li><a class="docs-nav-link" href="#cmd-man">man, preset & version</a></li>
             <li><a class="docs-nav-link" href="#cmd-completion">chest completion</a></li>
           </ul>
@@ -828,6 +829,134 @@ Continue? [y/N]: y
     <span class="t-cmd">download</span> <span class="t-ok">400.00 Mbps</span>  <span class="t-key">[◆◆◆◆◆◆◆◆◇◇◇◇◇◇◇◇]</span>
     <span class="t-cmd">upload</span>   <span class="t-ok">100.00 Mbps</span>  <span class="t-key">[◆◆◇◇◇◇◇◇◇◇◇◇◇◇◇◇]</span></code></pre>
           </div>
+
+          <h3 id="cmd-battery">chest battery</h3>
+          <p>Reports battery charge, power state, and drain rate. Aliased as <code>power</code> and <code>batt</code>. With no flags it takes a single reading; <code>--record</code> and <code>--daemon</code> build the history database that the period reports (<code>--day</code>, <code>--week</code>, <code>--month</code>, <code>--year</code>) read back. Readers are per-platform, and every report names the source it read from.</p>
+          <div class="code-block-wrapper">
+            <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">battery</span>                       <span class="t-comment"># Single reading</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">battery</span> <span class="t-flag">--low</span> 20 <span class="t-flag">--fail-under</span> 10  <span class="t-comment"># Mark 20% or below as LOW, exit 3 at 10%</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">battery</span> <span class="t-flag">--seconds</span> 30m <span class="t-flag">--interval</span> 5s <span class="t-comment"># Measure a drain rate over 30 minutes</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">battery</span> <span class="t-flag">--record</span> <span class="t-flag">--daemon</span>   <span class="t-comment"># Record history continuously until Ctrl+C</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">battery</span> <span class="t-flag">--week</span> <span class="t-flag">--apps</span> <span class="t-flag">--top</span> 8   <span class="t-comment"># Period report, with per-app estimates</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">battery</span> <span class="t-flag">--realtime</span>     <span class="t-comment"># Redraw the reading in place until Ctrl+C</span></code></pre>
+          </div>
+
+          <table class="flag-table">
+            <thead>
+              <tr>
+                <th>Flag</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="flag-badge">--record</span></td>
+                <td>boolean</td>
+                <td>Append each reading to the history database.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--seconds &lt;duration&gt;</span></td>
+                <td>duration</td>
+                <td>Measure over this long instead of taking a single reading.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--interval &lt;duration&gt;</span></td>
+                <td>duration</td>
+                <td>Sampling interval while measuring. Default <code>2s</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--json</span></td>
+                <td>boolean</td>
+                <td>Output the reading as machine-readable JSON instead of the table.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--low &lt;pct&gt;</span></td>
+                <td>int</td>
+                <td>Report charge at or below this percentage as low. <code>0</code> disables the warning.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--fail-under &lt;pct&gt;</span></td>
+                <td>int</td>
+                <td>Exit with code 3 when charge is at or below this percentage, for scripted checks. <code>0</code> disables it.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--db &lt;path&gt;</span></td>
+                <td>string</td>
+                <td>History database path. Default <code>~/.chest/battery.db</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--apps</span></td>
+                <td>boolean</td>
+                <td>Report per-application activity apportioned from measured CPU and I/O. An <strong>estimate</strong>, see below.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--top &lt;n&gt;</span></td>
+                <td>int</td>
+                <td>How many applications to list with <code>--apps</code>. Default <code>5</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--daemon</span></td>
+                <td>boolean</td>
+                <td>Keep recording in the foreground until Ctrl+C.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--realtime</span></td>
+                <td>boolean</td>
+                <td>Redraw the reading in place until Ctrl+C.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--day</span> / <span class="flag-badge">--week</span> / <span class="flag-badge">--month</span> / <span class="flag-badge">--year</span></td>
+                <td>boolean</td>
+                <td>Report that period from recorded history. Mutually exclusive.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4>Reading output</h4>
+          <p>The report lists charge, power state, and drain rate, then the fields the platform supplies: power draw, battery health, charge cycles, and time remaining. Anything the platform does not expose is listed under <code>Not reported</code> with the reason — including <code>time remaining</code>, which exists only while discharging — rather than printed as a zero. <code>--json</code> returns the same reading as structured rows, with a <code>*_known</code> flag beside every measurement and a <code>rate_provenance</code> field, so a consumer cannot read an estimate as a reading.</p>
+          <div class="code-block-wrapper">
+            <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">battery</span> <span class="t-flag">--json</span>
+{
+  <span class="t-json-key">"source"</span>: <span class="t-str">"GetSystemPowerStatus"</span>,
+  <span class="t-json-key">"full_capacity_wh"</span>: 35.74,
+  <span class="t-json-key">"design_capacity_wh"</span>: 45,
+  <span class="t-json-key">"health_pct"</span>: 79,
+  <span class="t-json-key">"charge_cycles"</span>: 1541
+}</code></pre>
+          </div>
+          <p style="margin-top: 16px;">Excerpt from a real Windows laptop: 45 Wh design capacity, 35.74 Wh full capacity, 79% health, 1541 charge cycles, and time remaining while discharging. The full JSON also carries charge, power state, wattage, and rate fields.</p>
+
+          <h4>Drain rate is an estimate</h4>
+          <div class="callout-box warn">
+            <i data-lucide="alert-circle" style="color: var(--accent-amber); font-size: 1.4rem; margin-top: 2px;"></i>
+            <div>
+              <strong style="color: var(--text-primary);">Charge is quantised to whole percentage points.</strong>
+              <div style="color: var(--text-secondary); margin-top: 4px;">
+                A drain rate is derived from the change in charge over a window, so the window has to be long enough to contain a change — roughly one point per 70 seconds on Windows. A window shorter than that reports <code>n/a</code> with the reason instead of a fabricated number; a computed rate is prefixed with <code>~</code> and its detail line names the window and the sample count.
+              </div>
+            </div>
+          </div>
+
+          <h4>History and period reports</h4>
+          <p><code>--record</code> appends each reading; <code>--daemon</code> keeps recording in the foreground until Ctrl+C. Readings go to their own SQLite database at <code>~/.chest/battery.db</code>, separate from the file index at <code>~/.chest/index.db</code>, so <code>chest clean --all</code> cannot destroy it. <code>chest clean --battery</code> clears it and is opt-in only.</p>
+          <p>Periods are cut in UTC, and <code>--week</code> is the ISO week, starting Monday. A period report prints its coverage first, then the charge change across the period, the drain rate, the charging and discharging sample counts, the top applications, and a vertical bar chart of their share underneath the table.</p>
+
+          <h4>Per-application figures are estimates</h4>
+          <div class="callout-box warn">
+            <i data-lucide="alert-circle" style="color: var(--accent-amber); font-size: 1.4rem; margin-top: 2px;"></i>
+            <div>
+              <strong style="color: var(--text-primary);">No platform reports per-application battery use to an unprivileged process.</strong>
+              <div style="color: var(--text-secondary); margin-top: 4px;">
+                <code>--apps</code> apportions the measured CPU and I/O into per-application numbers, and the output states this limitation itself. A lit display, a wireless radio, and thermal management draw real power at near-zero CPU and are invisible to the method.
+              </div>
+            </div>
+          </div>
+
+          <h4>Platform sources</h4>
+          <p>Windows, Linux, and macOS are supported, each with its own reader. Windows takes charge, mains state, and time remaining from <code>GetSystemPowerStatus</code>, then reads cycle count, full and design capacity, health, wattage, and voltage from the battery class driver unprivileged. macOS reads <code>ioreg AppleSmartBattery</code>; Linux reads <code>/sys/class/power_supply</code>.</p>
 
           <h3 id="cmd-man">man, preset & version</h3>
           <div class="code-block-wrapper">

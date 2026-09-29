@@ -42,48 +42,65 @@ const (
 // the coverage warning above it exists to prevent.
 const chartWidth = 24
 
-// sparkline renders values as a single row of block characters, one per column.
+// chartHeight is how many rows tall the vertical bars are drawn. Four is the
+// smallest height at which a bar chart still reads as columns rather than as a
+// row of blocks, and it keeps three applications to a dozen lines.
+const chartHeight = 4
+
+// column renders one vertical bar as height strings, top row first.
 //
-// Three arguments rather than one, because a chart that scales to its own
-// maximum cannot be used to compare rows. Every series is drawn against a max
-// shared by all of them, so an application that used a third of another's CPU
-// looks like a third, and a dot means one thing only: nothing was recorded for
-// that column. A per-row scale would render a light app and a heavy app
-// identically, which is the same class of error as reporting a rate nobody
-// measured.
-func sparkline(values []float64, observed []bool, max float64) string {
-	if len(values) == 0 {
-		return ""
+// A bar is drawn from the baseline upward, so a taller value is a taller column
+// rather than a different character in a single row. That is the whole point of
+// the change: with one row per series, three applications whose activity is
+// spread evenly over a day differ only in the shade of a block, and a reader has
+// to trust the peak figure to tell them apart. Stacked columns put the
+// comparison in the shape itself.
+//
+// Partial bars are drawn with the eighth-height block range so that a value
+// between two rows is still visible, and an unrecorded column is a dot down its
+// full height, which is the one thing the chart cannot honestly fill in.
+func column(v float64, observed bool, max float64, height int) []string {
+	rows := make([]string, height)
+	if !observed {
+		for i := range rows {
+			rows[i] = chartDot
+		}
+		return rows
 	}
 	if max <= 0 {
-		// Every value is zero. Drawn as dots rather than as a solid floor,
-		// because a solid bar would read as activity where there was none.
-		return strings.Repeat(chartDot, len(values))
+		// Every recorded value is zero. Drawn as an empty track rather than a
+		// solid bar, because a bar would read as activity where there was none.
+		for i := range rows {
+			rows[i] = chartEmpty
+		}
+		return rows
 	}
-	var b strings.Builder
-	for i, v := range values {
-		if i < len(observed) && !observed[i] {
-			b.WriteString(chartDot)
-			continue
-		}
-		// Quantised to eighths so a small non-zero value still shows a mark: a
-		// measured column must never be indistinguishable from an unrecorded
-		// one, which is what the dot above now means.
-		eighths := int(v / max * 8)
-		if eighths < 1 {
-			eighths = 1
-		}
-		if eighths > 8 {
-			eighths = 8
-		}
-		if eighths == 8 {
-			b.WriteString(chartFull)
-			continue
-		}
-		// Partial blocks are the eighth-height range U+2588..U+258F.
-		b.WriteRune(rune(0x2580 + 8 - eighths))
+	// Height in eighths of a cell, so the value can be finer than one row.
+	eighths := int(v / max * float64(height) * 8)
+	if eighths < 1 {
+		// A measured column must never be blank, or it reads as unrecorded.
+		eighths = 1
 	}
-	return b.String()
+	full := eighths / 8
+	rem := eighths % 8
+	// rows[0] is the top of the chart and rows[height-1] sits on the baseline,
+	// so the bar is filled from the bottom upward. Filling from the top would
+	// draw a tall bar hanging from the ceiling, which is the one thing a bar
+	// chart must never look like.
+	for i := 0; i < height; i++ {
+		// How many cells of this row are covered, counted from the baseline.
+		level := height - i
+		switch {
+		case level <= full:
+			rows[i] = chartFull
+		case level == full+1 && rem > 0:
+			// Partial blocks are the eighth-height range U+2588..U+258F.
+			rows[i] = string(rune(0x2580 + 8 - rem))
+		default:
+			rows[i] = chartEmpty
+		}
+	}
+	return rows
 }
 
 // columnOf maps an instant onto the chart column that covers it. Columns divide
@@ -133,9 +150,36 @@ func printAppChart(w io.Writer, r cellwatch.Range, series map[string][]cellwatch
 	if len(names) == 0 {
 		return
 	}
-	span := r.To.Sub(r.From)
 	fmt.Fprintf(w, "\n  %sACTIVITY OVER TIME%s  %s(ESTIMATE, from measured CPU and I/O; · = not recorded)%s\n",
 		chestGold, chestReset, chestDim, chestReset)
+	fmt.Fprintf(w, "  %seach block is one column, tallest is the peak of all rows%s\n", chestDim, chestReset)
+
+	// The chart is drawn over the window that was actually observed, not over the
+	// period that was asked for. A day in which the sampler ran for two hours
+	// would otherwise render as twenty-two dots and two marks: honest, and
+	// useless, because the shape the reader came for is squeezed into the last
+	// two cells. The unobserved remainder is not hidden by this -- the label
+	// below states both windows and the coverage between them.
+	from, to, ok := observedSpan(series, names)
+	if !ok {
+		fmt.Fprintf(w, "  %sno per-application history recorded for this period%s\n", chestDim, chestReset)
+		return
+	}
+	span := to.Sub(from)
+	if span <= 0 {
+		// A single reading has no width to divide. One column wide is the
+		// honest rendering: the alternative is a fabricated timeline.
+		span = time.Nanosecond
+	}
+
+	// The column count follows the data, up to the full width. A fixed 24
+	// columns would draw two recorded hours as two marks separated by a desert
+	// of dots, which is the same uselessness in a new place. Rows still share
+	// one column count, so they stay aligned and comparable.
+	cols := columnCount(series, names)
+	if cols > chartWidth {
+		cols = chartWidth
+	}
 
 	// Fold every series into the shared column grid, tracking which columns
 	// actually carry a sample so an unrecorded column stays distinguishable
@@ -148,10 +192,10 @@ func printAppChart(w io.Writer, r cellwatch.Range, series map[string][]cellwatch
 		if len(points) == 0 {
 			continue
 		}
-		vals := make([]float64, chartWidth)
-		obs := make([]bool, chartWidth)
+		vals := make([]float64, cols)
+		obs := make([]bool, cols)
 		for _, p := range points {
-			col := columnOf(p.At, r.From, span, chartWidth)
+			col := columnOf(p.At, from, span, cols)
 			if col < 0 {
 				continue
 			}
@@ -167,6 +211,13 @@ func printAppChart(w io.Writer, r cellwatch.Range, series map[string][]cellwatch
 		}
 	}
 
+	// One row of characters per value is replaced by a block of rows per
+	// application, so that the height of a column carries the comparison.
+	//
+	// The label column is a fixed width so that every application's bars begin
+	// in the same terminal column, which is what makes the blocks comparable
+	// straight down the screen rather than by eye.
+	const labelW = 22
 	any := false
 	for _, name := range names {
 		vals, ok := grid[name]
@@ -174,29 +225,116 @@ func printAppChart(w io.Writer, r cellwatch.Range, series map[string][]cellwatch
 			continue
 		}
 		any = true
-		fmt.Fprintf(w, "  %s%-22s%s %s%s%s\n",
-			chestDim, truncate(name, 22), chestReset,
-			chestCyan, sparkline(vals, seen[name], max), chestReset)
+		cells := make([][]string, len(vals))
+		for i, v := range vals {
+			obs := i < len(seen[name]) && seen[name][i]
+			cells[i] = column(v, obs, max, chartHeight)
+		}
+		for row := 0; row < chartHeight; row++ {
+			var b strings.Builder
+			for _, c := range cells {
+				b.WriteString(c[row])
+			}
+			// The name is printed once, level with the top of its own bars.
+			label := strings.Repeat(" ", labelW)
+			if row == 0 {
+				label = fmt.Sprintf("%s%-*s%s ", chestDim, labelW-2, truncate(name, labelW-2), chestReset)
+			}
+			fmt.Fprintf(w, "  %s%s%s%s\n", label, chestCyan, b.String(), chestReset)
+		}
+		// Each application carries its own baseline, so a block reads as a
+		// standalone chart rather than as a fragment of a shared one.
+		fmt.Fprintf(w, "  %s%s%s\n", strings.Repeat(" ", labelW),
+			strings.Repeat(chartEmpty, len(vals)), chestReset)
 	}
 	if !any {
-		fmt.Fprintf(w, "  %sno per-application history recorded for this period%s\n", chestDim, chestReset)
 		return
 	}
-	// The axis is labelled rather than left to the reader's inference, because a
-	// bare row of blocks does not say what span it covers.
-	fmt.Fprintf(w, "  %s%s%s %speak %s s CPU per column%s\n",
-		chestDim, chartSpanLabel(r), chestReset,
+
+	// Both windows are named. The observed one is what the chart shows; the
+	// requested one is what the reader asked for, and the difference between
+	// them is the whole reason a sparse chart is worth printing at all.
+	fmt.Fprintf(w, "  %s%s%s %speak %s s CPU per column%s",
+		chestDim, spanLabel(from, to), chestReset,
 		chestCyan, itoa(int(max+0.5)), chestReset)
+	if cov := coverageNote(r, to); cov != "" {
+		fmt.Fprintf(w, "  %s· %s%s", chestDim, cov, chestReset)
+	}
+	fmt.Fprintln(w)
 }
 
-// chartSpanLabel names the horizontal extent of the chart, in UTC, because the
-// buckets are cut in UTC and a local-time label would disagree with them by the
-// machine's offset.
-func chartSpanLabel(r cellwatch.Range) string {
-	if r.To.Sub(r.From) >= 48*time.Hour {
-		return r.From.Format("2 Jan") + " to " + r.To.Format("2 Jan") + " UTC"
+// observedSpan returns the earliest and latest instant carrying a sample across
+// the named series, so the chart covers the data rather than the request.
+func observedSpan(series map[string][]cellwatchPoint, names []string) (from, to time.Time, ok bool) {
+	for _, name := range names {
+		for _, p := range series[name] {
+			if !ok {
+				from, to, ok = p.At, p.At, true
+				continue
+			}
+			if p.At.Before(from) {
+				from = p.At
+			}
+			if p.At.After(to) {
+				to = p.At
+			}
+		}
 	}
-	return r.From.Format("2 Jan 15:04") + " to " + r.To.Format("15:04") + " UTC"
+	return from, to, ok
+}
+
+// coverageNote says how much of the requested period the chart accounts for, and
+// is empty when the chart covers all of it.
+func coverageNote(r cellwatch.Range, observedTo time.Time) string {
+	total := r.To.Sub(r.From)
+	if total <= 0 {
+		return ""
+	}
+	observed := observedTo.Sub(r.From)
+	if observed >= total {
+		return ""
+	}
+	pct := int(float64(observed) / float64(total) * 100)
+	return "chart covers the observed " + itoa(pct) + "% of " + chartSpanLabel(r)
+}
+
+// columnCount is the number of columns the chart should draw: as many as the
+// busiest series has samples, so that recorded data is not spread across empty
+// cells. It is the largest count across all series, which is what keeps the rows
+// aligned to one shared time axis.
+func columnCount(series map[string][]cellwatchPoint, names []string) int {
+	n := 0
+	for _, name := range names {
+		if len(series[name]) > n {
+			n = len(series[name])
+		}
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// spanLabel names the extent of the chart in UTC, because the buckets are cut in
+// UTC and a local-time label would disagree with them by the machine's offset.
+func spanLabel(from, to time.Time) string {
+	d := to.Sub(from)
+	// A span of a day or more is named by date on both ends. Labelling a
+	// midnight-to-midnight range by clock time alone renders as "00:00 to
+	// 00:00", which is the one span a reader cannot interpret.
+	if d >= 24*time.Hour {
+		return from.Format("2 Jan") + " to " + to.Format("2 Jan") + " UTC"
+	}
+	if d < time.Minute {
+		return from.Format("2 Jan 15:04 UTC") + ", single reading"
+	}
+	return from.Format("2 Jan 15:04") + " to " + to.Format("15:04") + " UTC"
+}
+
+// chartSpanLabel names a requested period, in UTC, for comparison against the
+// window the chart actually covers.
+func chartSpanLabel(r cellwatch.Range) string {
+	return spanLabel(r.From, r.To)
 }
 
 // itoa avoids pulling strconv in for a single call in a renderer.

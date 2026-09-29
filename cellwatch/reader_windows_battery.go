@@ -326,6 +326,17 @@ func readBatteryDetails(s *Status) {
 		s.Cap |= CapWatts
 	}
 
+	// The class driver reports a native power-state word, which is a better
+	// answer than the flag byte the status word was synthesised from.
+	// GetSystemPowerStatus collapses "discharging" into a low-battery warning
+	// and cannot distinguish a full pack on mains from a stalled charge, whereas
+	// the driver names the state directly. It replaces the synthesised word only
+	// when it actually recognised one, so an unrecognised value leaves the
+	// caller's existing word intact rather than blanking it.
+	if w := powerStateWord(b.PowerState); w != "" {
+		s.Status = w
+	}
+
 	// The driver reports present capacity even when the firmware declines to
 	// estimate a time remaining, so the two together yield a figure that does
 	// not depend on the firmware's willingness to guess. The division is only
@@ -338,6 +349,26 @@ func readBatteryDetails(s *Status) {
 			s.TimeToEmptyKnown = true
 			s.Cap |= CapTimeRemaining
 		}
+	}
+}
+
+// powerStateWord maps the driver's native power-state bits to a status word.
+// An unrecognised value yields an empty string, which the caller treats as "no
+// opinion" rather than as "unknown": the two are different facts, and only the
+// platform can say which one it meant.
+func powerStateWord(state uint32) string {
+	switch {
+	case state&powerCharging != 0:
+		return "Charging"
+	case state&powerDischarging != 0:
+		return "Discharging"
+	case state&powerCritical != 0:
+		return "Critical"
+	case state == 0:
+		// The driver sets no bit at all when the pack is full and idle on mains.
+		return "Full"
+	default:
+		return ""
 	}
 }
 

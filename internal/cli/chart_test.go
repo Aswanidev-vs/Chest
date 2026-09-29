@@ -14,74 +14,97 @@ import (
 // line can be measured as the reader sees it rather than as bytes.
 var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
-func TestSparklineScalesToASharedMaximum(t *testing.T) {
-	// Every row is drawn against one max so rows compare. A series scaled to
-	// its own maximum would make a heavy application and a light one identical.
-	got := sparkline([]float64{0.1, 0.2, 0.15, 0.3}, []bool{true, true, true, true}, 0.3)
-	if len([]rune(got)) != 4 {
-		t.Errorf("sparkline should render one cell per value, got %q", got)
+func TestColumnHeightRisesWithValue(t *testing.T) {
+	// The whole point of a bar chart: a larger value is a taller column, so the
+	// comparison lives in the shape rather than in a shade of block.
+	short := column(0.25, true, 1, chartHeight)
+	tall := column(1, true, 1, chartHeight)
+	if filled(t, short) >= filled(t, tall) {
+		t.Errorf("a quarter-height bar (%d cells) must be shorter than a full one (%d)",
+			filled(t, short), filled(t, tall))
 	}
-	if !strings.Contains(got, chartFull) {
-		t.Errorf("the shared maximum should render as a full block, got %q", got)
-	}
-
-	// Half the max must render at about half height, not full height.
-	half := sparkline([]float64{0.15}, []bool{true}, 0.3)
-	if strings.Contains(half, chartFull) {
-		t.Errorf("half of the shared max must not render as full, got %q", half)
+	if filled(t, tall) != chartHeight {
+		t.Errorf("the shared maximum should fill the column, got %d of %d", filled(t, tall), chartHeight)
 	}
 }
 
-func TestSparklineRendersAllZerosAsDots(t *testing.T) {
-	// A solid floor would read as activity where there was none, which is the
-	// exact confusion the honesty contract exists to prevent.
-	got := sparkline([]float64{0, 0, 0}, []bool{true, true, true}, 0)
-	if strings.ContainsAny(got, chartFull) {
-		t.Errorf("an all-zero series must not draw a solid block, got %q", got)
-	}
-	if got != strings.Repeat(chartDot, 3) {
-		t.Errorf("all-zero series = %q, want three dots", got)
+func TestColumnScalesAgainstTheSharedMaximum(t *testing.T) {
+	// Half the shared max is half the height. Against a per-row scale, a heavy
+	// and a light application would render identically.
+	half := column(0.5, true, 1, chartHeight)
+	if got := filled(t, half); got != chartHeight/2 {
+		t.Errorf("half the max should be half height, got %d of %d", got, chartHeight)
 	}
 }
 
-func TestSparklineDistinguishesIdleFromEmpty(t *testing.T) {
-	// A series of 0.02 and a series of 0.0 must not look identical.
-	idle := sparkline([]float64{0.02, 0.02, 0.02}, []bool{true, true, true}, 0.02)
-	empty := sparkline([]float64{0, 0, 0}, []bool{true, true, true}, 0)
-	if idle == empty {
-		t.Errorf("a small non-zero series (%q) must differ from all-zero (%q)", idle, empty)
+func TestColumnMarksUnrecordedAsDots(t *testing.T) {
+	// A gap in coverage must be visible as a gap and must not be confused with
+	// a recorded zero.
+	got := column(0, false, 1, chartHeight)
+	if filled(t, got) != 0 || got[chartHeight-1] != chartDot {
+		t.Errorf("an unrecorded column should be all dots, got %q", got)
 	}
 }
 
-func TestSparklineMarksUnrecordedColumnsAsDots(t *testing.T) {
-	// A gap in coverage must be visible as a gap, and must not be confused
-	// with a recorded zero.
-	got := sparkline([]float64{1, 0, 1}, []bool{true, false, true}, 1)
-	cells := []rune(got)
-	if len(cells) != 3 {
-		t.Fatalf("want three cells, got %q", got)
-	}
-	if cells[1] != []rune(chartDot)[0] {
-		t.Errorf("an unrecorded column should be a dot, got %q", got)
-	}
-	if cells[0] == []rune(chartDot)[0] || cells[2] == []rune(chartDot)[0] {
-		t.Errorf("recorded columns must not be dots, got %q", got)
-	}
-}
-
-func TestSparklineRecordedZeroIsNotADot(t *testing.T) {
+func TestColumnRecordedZeroIsNotADot(t *testing.T) {
 	// Recorded-and-zero is a measurement. Only unrecorded is a dot, otherwise
 	// the dot would mean two different things.
-	got := sparkline([]float64{0}, []bool{true}, 1)
-	if strings.ContainsRune(got, []rune(chartDot)[0]) {
-		t.Errorf("a recorded zero should still show a mark, got %q", got)
+	got := column(0, true, 1, chartHeight)
+	if strings.Contains(strings.Join(got, ""), chartDot) {
+		t.Errorf("a recorded zero must not render as a dot, got %q", got)
+	}
+	// A measured column always shows something, even at the very bottom.
+	if got[chartHeight-1] == chartEmpty {
+		t.Errorf("a recorded zero should sit on the baseline, got %q", got)
 	}
 }
 
-func TestSparklineEmptyInput(t *testing.T) {
-	if got := sparkline(nil, nil, 1); got != "" {
-		t.Errorf("no values should render nothing, got %q", got)
+func TestColumnGrowsUpFromTheBaseline(t *testing.T) {
+	// A bar chart filled from the top would draw bars hanging from the ceiling.
+	// The filled cells must be contiguous with the last row, which is the
+	// baseline, so the check walks upward from the bottom.
+	for _, frac := range []float64{0.01, 0.25, 0.5, 0.75, 1} {
+		rows := column(frac, true, 1, chartHeight)
+		if rows[chartHeight-1] == chartEmpty {
+			t.Errorf("frac %v: bar does not reach the baseline, got %q", frac, rows)
+			continue
+		}
+		gap := false
+		for i := chartHeight - 1; i >= 0; i-- {
+			if rows[i] == chartEmpty {
+				gap = true
+				continue
+			}
+			if gap {
+				t.Errorf("frac %v: bar floats above the baseline, got %q", frac, rows)
+				break
+			}
+		}
 	}
+}
+
+func TestColumnWithNoMaxDrawsAnEmptyTrack(t *testing.T) {
+	// Every recorded value is zero. A solid bar would read as activity where
+	// there was none.
+	got := column(0, true, 0, chartHeight)
+	if filled(t, got) != 0 {
+		t.Errorf("a zero maximum must draw no bar, got %q", got)
+	}
+	if strings.ContainsRune(strings.Join(got, ""), []rune(chartDot)[0]) {
+		t.Errorf("a recorded column must not become a dot, got %q", got)
+	}
+}
+
+// filled counts the solid cells in a rendered column, which is its height.
+func filled(t *testing.T, rows []string) int {
+	t.Helper()
+	n := 0
+	for _, r := range rows {
+		if r == chartFull {
+			n++
+		}
+	}
+	return n
 }
 
 func TestColumnOfMapsOntoTheChartGrid(t *testing.T) {
@@ -194,26 +217,122 @@ func TestPrintAppChartRendersOneFixedWidthForEveryRow(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	printAppChart(&buf, cellwatch.Range{From: from, To: to}, series, []string{"many.exe", "one.exe"})
+	plain := ansiPattern.ReplaceAllString(buf.String(), "")
 
-	widths := map[int]bool{}
-	for _, line := range strings.Split(buf.String(), "\n") {
-		if !strings.Contains(line, "many.exe") && !strings.Contains(line, "one.exe") {
-			continue
-		}
-		// Colour escapes contain no spaces but sit inside the field, so the
-		// line is stripped before the chart cell is measured.
-		plain := ansiPattern.ReplaceAllString(line, "")
-		fields := strings.Fields(plain)
-		if len(fields) < 2 {
-			t.Fatalf("chart row did not render a name and a chart: %q", line)
-		}
-		widths[len([]rune(fields[len(fields)-1]))] = true
+	// Every block is the same width, so the bars line up down the screen. The
+	// width follows the busiest series, because the column grid is shared.
+	if !strings.Contains(plain, strings.Repeat(chartEmpty, 3)) {
+		t.Errorf("a three-sample series should draw three columns:\n%s", plain)
 	}
-	if len(widths) != 1 {
-		t.Errorf("every chart row must be the same width, got widths %v\n%s", widths, buf.String())
+	if !strings.Contains(plain, "many.exe") || !strings.Contains(plain, "one.exe") {
+		t.Errorf("both applications should be named:\n%s", plain)
 	}
-	if !widths[chartWidth] {
-		t.Errorf("chart rows should be %d columns wide, got %v", chartWidth, widths)
+}
+
+func TestPrintAppChartPlotsTheObservedWindowNotTheRequestedOne(t *testing.T) {
+	// A day in which the sampler ran for two hours must not render as
+	// twenty-two empty columns and two marks: the chart covers the data, and
+	// says which part of the request that was.
+	from := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	series := map[string][]cellwatchPoint{
+		"Code.exe": {
+			{At: from.Add(22 * time.Hour), CPUSeconds: 1},
+			{At: from.Add(23 * time.Hour), CPUSeconds: 5},
+		},
+	}
+	var buf bytes.Buffer
+	printAppChart(&buf, cellwatch.Range{From: from, To: from.Add(24 * time.Hour)},
+		series, []string{"Code.exe"})
+	plain := ansiPattern.ReplaceAllString(buf.String(), "")
+
+	// Two samples draw two columns, not a chart mostly made of gaps.
+	if strings.Contains(plain, strings.Repeat(chartEmpty, 3)) {
+		t.Errorf("two adjacent samples should not leave a desert of gaps:\n%s", plain)
+	}
+	// Both windows are named, so the compression is disclosed rather than hidden.
+	if !strings.Contains(plain, "22:00") {
+		t.Errorf("the observed window should be labelled:\n%s", plain)
+	}
+	if !strings.Contains(plain, "15 Mar") {
+		t.Errorf("the requested period should still be named:\n%s", plain)
+	}
+}
+
+func TestColumnCountFollowsTheBusiestSeries(t *testing.T) {
+	// The column count is the largest sample count, capped at the full width,
+	// so rows share one time axis and recorded data is not spread over gaps.
+	base := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	many := make([]cellwatchPoint, 30)
+	for i := range many {
+		many[i] = cellwatchPoint{At: base.Add(time.Duration(i) * time.Hour)}
+	}
+	series := map[string][]cellwatchPoint{"a.exe": many, "b.exe": many[:2]}
+	if got := columnCount(series, []string{"a.exe", "b.exe"}); got != 30 {
+		t.Errorf("columnCount = %d, want 30", got)
+	}
+	if got := columnCount(map[string][]cellwatchPoint{"a.exe": nil}, []string{"a.exe"}); got != 1 {
+		t.Errorf("an empty series should still yield one column, got %d", got)
+	}
+}
+
+func TestSpanLabelNamesBothEndsOfAMidnightToMidnightRange(t *testing.T) {
+	// Labelling a day by clock time alone renders as "00:00 to 00:00", which is
+	// the one span a reader cannot interpret.
+	from := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	got := spanLabel(from, from.Add(24*time.Hour))
+	if strings.Contains(got, "to 00:00") {
+		t.Errorf("a midnight-to-midnight span must be named by date, got %q", got)
+	}
+	if !strings.Contains(got, "15 Mar") || !strings.Contains(got, "16 Mar") {
+		t.Errorf("both end dates should appear, got %q", got)
+	}
+}
+
+func TestObservedSpanCoversTheEarliestAndLatestSample(t *testing.T) {
+	base := time.Date(2026, 3, 15, 6, 0, 0, 0, time.UTC)
+	series := map[string][]cellwatchPoint{
+		"a.exe": {{At: base.Add(2 * time.Hour)}},
+		"b.exe": {{At: base}, {At: base.Add(5 * time.Hour)}},
+	}
+	from, to, ok := observedSpan(series, []string{"a.exe", "b.exe"})
+	if !ok {
+		t.Fatal("expected an observed span")
+	}
+	if !from.Equal(base) || !to.Equal(base.Add(5*time.Hour)) {
+		t.Errorf("span = %v to %v, want %v to %v", from, to, base, base.Add(5*time.Hour))
+	}
+}
+
+func TestObservedSpanIsFalseWithNoSamples(t *testing.T) {
+	if _, _, ok := observedSpan(map[string][]cellwatchPoint{"a.exe": nil}, []string{"a.exe"}); ok {
+		t.Error("no samples must report no observed span")
+	}
+}
+
+func TestPrintAppChartHandlesASingleReading(t *testing.T) {
+	// One sample has no width to divide. It must render as one column rather
+	// than as a fabricated timeline.
+	at := time.Date(2026, 3, 15, 14, 30, 0, 0, time.UTC)
+	var buf bytes.Buffer
+	printAppChart(&buf, cellwatch.Range{From: at.Add(-time.Hour), To: at.Add(time.Hour)},
+		map[string][]cellwatchPoint{"a.exe": {{At: at, CPUSeconds: 3}}}, []string{"a.exe"})
+	plain := ansiPattern.ReplaceAllString(buf.String(), "")
+	if !strings.Contains(plain, "single reading") {
+		t.Errorf("a single sample should say so:\n%s", plain)
+	}
+	if !strings.Contains(plain, chartFull) {
+		t.Errorf("a single sample should still draw its value:\n%s", plain)
+	}
+}
+
+func TestCoverageNoteIsEmptyWhenFullyCovered(t *testing.T) {
+	from := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
+	r := cellwatch.Range{From: from, To: from.Add(24 * time.Hour)}
+	if got := coverageNote(r, r.To); got != "" {
+		t.Errorf("a fully covered period needs no caveat, got %q", got)
+	}
+	if got := coverageNote(r, from.Add(2*time.Hour)); got == "" {
+		t.Error("a partly covered period should say so")
 	}
 }
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -206,5 +207,83 @@ func TestMissingCapabilitiesNamesGaps(t *testing.T) {
 	}
 	if strings.Contains(got, "charge") {
 		t.Errorf("a reported capability must not be listed as missing, got %q", got)
+	}
+}
+
+// frameRewind reads the cursor-up count a redraw frame begins with, and returns
+// 0 when the frame does not rewind.
+func frameRewind(frame string) int {
+	i := strings.Index(frame, "\x1b[")
+	if i < 0 {
+		return 0
+	}
+	rest := frame[i+2:]
+	end := strings.IndexByte(rest, 'A')
+	if end < 0 {
+		return 0
+	}
+	n := 0
+	for _, c := range rest[:end] {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
+}
+
+func TestPrintBatteryLiveRewindsExactlyWhatItOccupied(t *testing.T) {
+	// The live view redraws in place. If the rewind count does not equal the
+	// number of lines the previous frame occupied, the block creeps down the
+	// screen on every refresh until it scrolls away.
+	s := windowsLike()
+	rate := cellwatch.Rate{Reason: "collecting samples"}
+
+	var first bytes.Buffer
+	printBatteryLive(&first, s, rate, true)
+
+	var second bytes.Buffer
+	printBatteryLive(&second, s, rate, false)
+
+	occupied := strings.Count(first.String(), "\n") + 1
+	if got := frameRewind(second.String()); got != occupied {
+		t.Errorf("frame rewinds %d lines but occupies %d", got, occupied)
+	}
+}
+
+func TestPrintBatteryLiveFirstFrameDoesNotRewind(t *testing.T) {
+	// Nothing has been drawn yet, so rewinding would put the cursor above the
+	// top of the terminal and print the reading over the shell prompt.
+	var buf bytes.Buffer
+	printBatteryLive(&buf, windowsLike(), cellwatch.Rate{Reason: "collecting samples"}, true)
+	if got := frameRewind(buf.String()); got != 0 {
+		t.Errorf("the first frame rewound %d lines, want 0", got)
+	}
+}
+
+func TestPrintBatteryLiveNeverHidesTheCursor(t *testing.T) {
+	// Hiding the cursor and never restoring it leaves the user's shell with an
+	// invisible prompt after the command exits.
+	var buf bytes.Buffer
+	printBatteryLive(&buf, windowsLike(), cellwatch.Rate{Reason: "collecting samples"}, true)
+	printBatteryLive(&buf, windowsLike(), cellwatch.Rate{Reason: "collecting samples"}, false)
+	if strings.Contains(buf.String(), "?25l") {
+		t.Error("the live view must not hide the cursor")
+	}
+}
+
+func TestIsTerminalRejectsAClosedPipe(t *testing.T) {
+	// The live view is skipped off a terminal, so a pipe must not be mistaken
+	// for one: escape sequences in a log file are unreadable.
+	f, err := os.CreateTemp(t.TempDir(), "out")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if isTerminal(f) {
+		t.Error("a regular file must not be detected as a terminal")
+	}
+	if isTerminal(nil) {
+		t.Error("a nil file must not be detected as a terminal")
 	}
 }
