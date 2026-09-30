@@ -121,19 +121,42 @@ func (w *rateWindow) rate(p RateParams) Rate {
 		return r
 	}
 
+	// A window may not span a change of power source: the charge curve is
+	// genuinely discontinuous at that point and no estimator is entitled to
+	// bridge it. Rejecting the window while leaving it in place is not enough
+	// either, because every later call re-detects the same historical change
+	// and refuses in turn, so a single unplug would end estimation for the life
+	// of the process. Dropping the window outright is no better: it throws
+	// away the readings taken since the change and leaves the caller unable to
+	// report anything until a whole fresh window has accumulated. So restart
+	// the window the way the reason string promises, keeping the samples from
+	// the most recent change onward and discarding the prefix before it. The
+	// retained samples all share the power source currently in effect, so the
+	// discontinuity is no longer bridged and recovery happens on this very
+	// call rather than after another full window.
+	//
+	// The smoothed figure is cleared along with the prefix because it was
+	// averaged across the discontinuity, and the count is restated because the
+	// result must describe the readings that survive the trim.
+	rest := 0
+	for i := 1; i < len(w.samples); i++ {
+		if w.samples[i].AC != w.samples[i-1].AC || w.samples[i].Charge != w.samples[i-1].Charge {
+			rest = i
+		}
+	}
+	if rest > 0 {
+		w.samples = w.samples[:copy(w.samples, w.samples[rest:])]
+		w.ema, w.primed = 0, false
+	}
+	r.Samples = len(w.samples)
+	if len(w.samples) < 2 {
+		r.Reason = "power source changed, restarting window"
+		return r
+	}
+
 	first, last := w.samples[0], w.samples[len(w.samples)-1]
 	span := last.At.Sub(first.At)
 	r.Span = span
-
-	// Reject a window that spans a change of power source. The charge curve is
-	// genuinely discontinuous at that point and no estimator is entitled to
-	// bridge it.
-	for _, s := range w.samples[1:] {
-		if s.AC != first.AC || s.Charge != first.Charge {
-			r.Reason = "power source changed, restarting window"
-			return r
-		}
-	}
 
 	if r.Samples < p.MinSamples {
 		r.Reason = "collecting samples"

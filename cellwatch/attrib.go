@@ -144,11 +144,15 @@ func takeSnapshot() (procSnapshot, error) {
 
 // Attributor accumulates process snapshots and apportions observed drain across
 // applications. The zero value is not usable; construct with NewAttributor.
+//
+// The only state is the pair of snapshots. Nothing else is carried between
+// Sample and Attribute, so Attribute is a pure function of the window it is
+// given: calling it twice over the same window returns the same table, and a
+// caller that renders the attribution and reports its coverage does not get
+// figures that drift on every render.
 type Attributor struct {
-	first  *procSnapshot
-	last   *procSnapshot
-	ioFail int
-	procs  int
+	first *procSnapshot
+	last  *procSnapshot
 }
 
 // NewAttributor returns an unattributed attributor. Call Sample once per tick
@@ -191,15 +195,31 @@ func (a *Attributor) Attribute(systemPctPerHour float64) Attribution {
 	// Per-PID deltas, folded by executable name. A browser is thirty processes
 	// and reporting it as thirty rows would be technically accurate and
 	// useless.
+	//
+	// cpu, read and write accumulate raw measured bytes and seconds and are
+	// reported as such. weight accumulates the *clamped* normalised weights
+	// instead of a total to be renormalised later, so that the numerator of
+	// every share and the denominator it is divided by come from exactly the
+	// same clamped quantities.
 	type fold struct {
-		procs int
-		cpu   float64
-		read  uint64
-		write uint64
+		procs  int
+		cpu    float64
+		read   uint64
+		write  uint64
+		weight float64
 	}
 	byName := map[string]*fold{}
 	var totalWeight float64
 	var totalCPU float64
+
+	// lost counts what this pass could not credit, and is local to this pass.
+	// ProcessesLost is documented as a property of the window, not of the
+	// attributor's lifetime, and a counter carried on the receiver cannot
+	// describe a window: every call re-reads the same snapshots and would either
+	// re-add the same processes or inflate the count a caller renders. Keeping
+	// it here also leaves Attribute a pure function of the window, so the same
+	// window returns the same figure however many times it is asked for.
+	lost := 0
 
 	capacity := float64(a.last.nCPU) * span.Seconds()
 	if capacity <= 0 {
@@ -210,14 +230,26 @@ func (a *Attributor) Attribute(systemPctPerHour float64) Attribution {
 	for pid, now := range a.last.procs {
 		before, existed := a.first.procs[pid]
 		if !existed {
-			// Started during the window. Its whole life is inside the window,
-			// so its counters are already correct without subtraction.
-			a.procs++
-			continue
+			// Started during the window. It has no baseline, but its counters do
+			// not need one either: its whole measured life lies inside the
+			// window, so the totals it already reports are the totals it burned
+			// here. A zero baseline credits it against the window, which is what
+			// the comment this branch replaces claimed but the code did not do.
+			//
+			// Dropping it instead would be worse than losing a row. The other
+			// applications would be normalised against a total that excludes it
+			// and would absorb its drain as their own, the table would report a
+			// share of one, and Unattributed would report that nothing had been
+			// missed. Crediting it here is also the conservative direction: the
+			// share can only be over-credited if a process that predates the
+			// window was unreadable at the start of it, and that over-credit is
+			// shared with the other applications rather than concentrated.
+			before = procSample{pid: pid, name: now.name}
 		}
 		if before.created != 0 && now.created != 0 && before.created != now.created {
 			// The PID was reused. The delta belongs to two different programs.
 			out.Notes = append(out.Notes, "dropped a PID whose identity changed during the window")
+			lost++
 			continue
 		}
 
@@ -226,7 +258,7 @@ func (a *Attributor) Attribute(systemPctPerHour float64) Attribution {
 			// A counter went backwards, which happens when a process is
 			// replaced under the same PID without the creation-time guard
 			// firing, for instance on a platform that cannot report it.
-			a.ioFail++
+			lost++
 			continue
 		}
 		readDelta, writeDelta := uint64(0), uint64(0)
@@ -239,6 +271,9 @@ func (a *Attributor) Attribute(systemPctPerHour float64) Attribution {
 
 		cpuNorm := cpuDelta / capacity
 		if cpuNorm > 1 {
+			// A process cannot use more than the whole machine. Clamping here is
+			// what stops a thirty-thread renderer claiming thirty times the
+			// machine's share.
 			cpuNorm = 1
 		}
 		bytesTotal := float64(readDelta + writeDelta)
@@ -260,6 +295,7 @@ func (a *Attributor) Attribute(systemPctPerHour float64) Attribution {
 		f.cpu += cpuDelta
 		f.read += readDelta
 		f.write += writeDelta
+		f.weight += w
 	}
 
 	if totalWeight < attribIdleFloor {
@@ -275,10 +311,17 @@ func (a *Attributor) Attribute(systemPctPerHour float64) Attribution {
 	out.CPUCapacityPct = totalCPU / float64(a.last.nCPU) * 100
 	apps := make([]AppActivity, 0, len(byName))
 	for name, f := range byName {
-		cpuNorm := f.cpu / capacity
-		ioNorm := float64(f.read+f.write) / (float64(attribIOBudget) * span.Seconds())
-		weight := attribCPUWeight*cpuNorm + attribIOWeight*ioNorm
-		share := weight / totalWeight
+		// The application's weight is the sum of its processes' clamped
+		// weights, and totalWeight is the sum of the same clamped weights. They
+		// are two summations of one set of numbers, so they cannot disagree by
+		// more than floating-point rounding and no share can exceed one.
+		//
+		// Recomputing a weight here from the folded raw totals would put the
+		// numerator and the denominator on different scales: a process using
+		// five cores' worth of CPU in a one-core window has a clamped weight of
+		// one but an unfolded weight of five, which divided by the clamped total
+		// yields a share of five and a remainder of minus four.
+		share := f.weight / totalWeight
 		apps = append(apps, AppActivity{
 			Name:       name,
 			Procs:      f.procs,
@@ -306,8 +349,15 @@ func (a *Attributor) Attribute(systemPctPerHour float64) Attribution {
 	// a table whose shares sum to exactly one is a table that has rounded away
 	// something real.
 	out.Unattributed = 1 - attributed
+	if out.Unattributed < 0 {
+		// Every share is its weight over the total of those same weights, so the
+		// remainder is zero by construction and a negative value is the order in
+		// which the summations were performed. Reporting it would be a claim
+		// that more drain was seen than existed.
+		out.Unattributed = 0
+	}
 	out.Apps = apps
-	out.ProcessesLost = a.ioFail
+	out.ProcessesLost = lost
 	return out
 }
 

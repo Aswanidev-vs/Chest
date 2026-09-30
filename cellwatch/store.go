@@ -191,8 +191,14 @@ func ThisPeriod(now time.Time, p Period) Range {
 	case PeriodDay:
 		from = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 	case PeriodWeek:
-		_, week := t.ISOWeek()
-		from = isoWeekStart(t.Year(), week)
+		// The ISO year, not the calendar year. The two disagree in the first
+		// days of January and the last days of December, and substituting the
+		// calendar year there produces a range that is not merely a week out: on
+		// 1 January the From lands in the following January and the range is
+		// inverted, so every query against it returns nothing and the report
+		// reads as an empty history rather than as a failure.
+		isoYear, week := t.ISOWeek()
+		from = isoWeekStart(isoYear, week)
 	case PeriodMonth:
 		from = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 	case PeriodYear:
@@ -214,8 +220,8 @@ func (p Period) Previous(now time.Time) Range {
 		d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 		return Range{From: d.AddDate(0, 0, -1), To: d}
 	case PeriodWeek:
-		_, week := t.ISOWeek()
-		this := isoWeekStart(t.Year(), week)
+		isoYear, week := t.ISOWeek()
+		this := isoWeekStart(isoYear, week)
 		return Range{From: this.AddDate(0, 0, -7), To: this}
 	case PeriodMonth:
 		first := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
@@ -274,9 +280,7 @@ func Open(path string) (Store, error) {
 
 func (s *sqliteStore) Close() error { return s.db.Close() }
 
-// Record writes a reading and updates every rollup tier it belongs to. The
-// rollup update is an accumulating upsert, so replaying the same instant adds
-// to the bucket rather than replacing or double-counting it.
+// Record writes a reading and updates every rollup tier it belongs to.
 func (s *sqliteStore) Record(ctx context.Context, st Status) error {
 	return s.recordAt(ctx, st, time.Now().UTC())
 }
@@ -307,12 +311,33 @@ func (s *sqliteStore) recordAt(ctx context.Context, st Status, at time.Time) err
 	}
 
 	for _, b := range bucketsFor(at) {
+		// A rollup row is the most recent reading folded into the bucket, so a
+		// later sample in the same bucket must overwrite it. Last-write-wins
+		// rather than a mean, for three reasons.
+		//
+		// A running mean needs the number of samples that went into the row, and
+		// the rollup table has nowhere to keep that count. Adding a column would
+		// mean a migration, which this schema deliberately does without: opening
+		// a database written by an older build must not touch recorded history.
+		//
+		// A mean recomputed from the stored columns alone is not reproducible
+		// either, because raw rows are pruned. The statement this replaces
+		// averaged the one row visible to an UPSERT, which is the pre-update row
+		// itself, so it returned the first sample of the bucket forever and
+		// silently reported it as the hour's figure. ac, charging and watts were
+		// not in the update list at all and so were frozen at their first values.
+		//
+		// Last-write-wins is also the only one of the three that is idempotent
+		// under replay, which Record promises: re-recording an instant rewrites
+		// the same values rather than folding the same reading in twice. A bucket
+		// that keeps only its first sample is a fabricated measurement; one that
+		// keeps its last is a real, if coarsely sampled, one.
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO battery_rollups(tier,bucket,charge,ac,charging,watts) VALUES(?,?,?,?,?,?)
 			 ON CONFLICT(tier,bucket) DO UPDATE SET
-			   charge=(SELECT AVG(charge) FROM battery_rollups WHERE tier=? AND bucket=?)`,
-			b.tier, b.start.UnixMicro(), st.ChargePct, int(st.AC), boolToInt(st.Charging), st.Watts,
-			b.tier, b.start.UnixMicro()); err != nil {
+			   charge=excluded.charge, ac=excluded.ac,
+			   charging=excluded.charging, watts=excluded.watts`,
+			b.tier, b.start.UnixMicro(), st.ChargePct, int(st.AC), boolToInt(st.Charging), st.Watts); err != nil {
 			return err
 		}
 	}
@@ -580,6 +605,13 @@ func (s *sqliteStore) TopApps(ctx context.Context, r Range, n int) ([]AppTotal, 
 // Usage reports system activity over a range together with the coverage of the
 // range, so a report can distinguish a machine that used no power from one that
 // was never observed.
+//
+// The charging and discharging counts are counts of hour buckets, not of
+// samples. Each bucket is classified by the state of its last folded reading,
+// so an hour that began discharging and ended on mains is reported as the hour
+// it ended in. Their names say "Samples" and that is worth knowing before the
+// pair is quoted as a count of observations: one bucket stands for as many
+// readings as the sampler took in that hour, which is usually not one.
 func (s *sqliteStore) Usage(ctx context.Context, r Range) (*UsageReport, error) {
 	var rep UsageReport
 	rep.Range = r
@@ -604,9 +636,11 @@ func (s *sqliteStore) Usage(ctx context.Context, r Range) (*UsageReport, error) 
 		}
 		if !haveFirst {
 			firstCharge, haveFirst = charge, true
-			rep.Coverage.Samples++
 		}
 		lastCharge = charge
+		// One sample per bucket. The count is what gates Coverage.Usable and the
+		// "history is sparse" warning, so counting the first row twice inflates
+		// a thin history into a complete one.
 		rep.Coverage.Samples++
 		if charging == 1 {
 			rep.System.ChargingSamples++
