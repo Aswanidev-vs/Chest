@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -121,7 +123,7 @@ Protected system directories are refused outright; 'repl' has no
 			"-i, --into <dir>     Base destination directory for planned moves",
 			"-r, --recursive      Include subdirectories in the scan",
 			"-H, --hidden         Include hidden files and folders",
-			"-x, --exclude <list> Skip files or folders (e.g. '.git,node_modules')",
+			"-x, --exclude <list>  Skip files or folders (e.g. '.git,node_modules')",
 			"-c, --collision      Collision policy: skip (default), rename, replace, abort",
 			"-y, --yes            Skip the confirmation prompt on apply",
 		},
@@ -216,11 +218,11 @@ Protected system directories are refused outright; 'repl' has no
 directory traversal (fastwalk) and zero-allocation fuzzy matching (fzf/src/algo).
 Supports both filename/path searching and streaming content grep with line numbers.`,
 		Options: []string{
-			"-c, --content <text> Search inside file contents (streaming grep)",
+			"-c, --content <text>  Search inside file contents (streaming grep)",
 			"-t, --type <cat>     Filter by category (image, video, document, code, archive...)",
 			"-e, --ext <exts>     Comma-separated extension filter (e.g. 'go,md,png')",
 			"-s, --size <cond>    Size condition (e.g. '>1GB', '<50MB', '=10KB')",
-			"-m, --modified <val> Modification time condition (e.g. '>30d', '<7d', '2026-01-01')",
+			"-m, --modified <val>  Modification time condition (e.g. '>30d', '<7d', '2026-01-01')",
 			"-r, --regex          Treat pattern as a regular expression",
 			"-x, --exact          Exact substring matching instead of fuzzy ranking",
 			"-H, --hidden         Include hidden files in search",
@@ -245,7 +247,7 @@ into compartments according to chosen presets or rules.`,
 		Options: []string{
 			"-p, --preset <name>  Preset to apply (default: 'downloads')",
 			"-r, --rule <spec>    Custom rule expression to apply",
-			"-d, --debounce <dur> Settle duration before moving file (default: 500ms)",
+			"-d, --debounce <dur>  Settle duration before moving file (default: 500ms)",
 			"-n, --dry-run        Print actions without actually moving files",
 			"--name <name>        Move ALL incoming matching files flat into one folder in the watched dir (e.g. --name \"Anime\" -> Anime/*.mp4)",
 			"--allow-system       Allow monitoring and moving in protected system directories",
@@ -547,12 +549,12 @@ HISTORY
 			"--seconds <duration>   Measure over this long instead of taking a single reading",
 			"--realtime             Redraw the reading in place until Ctrl+C",
 			"--daemon               Keep recording in the foreground until Ctrl+C",
-			"--interval <duration>  Sampling interval while measuring (default 2s)",
+			"--interval <duration>  Sampling interval while measuring (default 2s, floored at 5s by the sampler)",
 			"--json                 Output as machine-readable JSON",
-			"--low <pct>            Report charge at or below this percentage as low",
-			"--fail-under <pct>     Exit 3 when charge is at or below this percentage",
-			"--apps                 Per-application activity apportioned from CPU and I/O (ESTIMATE)",
-			"--top <n>              How many applications to list with --apps (default 5)",
+			"--low <pct>            Report charge at or below this percentage as low (0-100, 0 disables)",
+			"--fail-under <pct>     Exit 3 when charge is at or below this percentage (0-100, 0 disables)",
+			"--apps                 Per-application activity apportioned from CPU and I/O (ESTIMATE; needs a window)",
+			"--top <n>              How many applications to list with --apps (default 5, minimum 1)",
 			"--day                  Report the current UTC day from history",
 			"--week                 Report the current ISO week from history",
 			"--month                Report the current calendar month from history",
@@ -608,11 +610,63 @@ traditional Unix man page style with Synopsis, Description, Options, and Example
 	}
 }
 
+// splitFlagDesc separates a flag from its description.
+//
+// The topics align these by hand, so the two are joined by a run of two or
+// more spaces. That run is where the alignment goes, and it is collapsed here
+// rather than counted a second time by the printer.
+func splitFlagDesc(opt string) (name, desc string) {
+	opt = strings.TrimSpace(opt)
+	if i := strings.Index(opt, "  "); i > 0 {
+		return strings.TrimSpace(opt[:i]), strings.TrimSpace(opt[i:])
+	}
+	return opt, ""
+}
+
+// renderManOptions prints a topic's OPTIONS block.
+//
+// Each topic hand-aligns its own options to its own idea of how wide a flag
+// column should be. Padding them again to a width unrelated to the topic is
+// what left the descriptions in a ragged column, so the name and the
+// description are separated once here and the column is sized to the flags this
+// topic actually has.
+func renderManOptions(w io.Writer, options []string) {
+	type option struct{ name, desc string }
+	opts := make([]option, 0, len(options))
+	width := 0
+	for _, opt := range options {
+		name, desc := splitFlagDesc(opt)
+		if len(name) > width {
+			width = len(name)
+		}
+		opts = append(opts, option{name, desc})
+	}
+
+	// One very long flag must not drag every other description across the
+	// screen, so the column is capped and a flag too wide for it takes its
+	// description on the line below instead.
+	const maxFlagCol = 26
+	if width > maxFlagCol {
+		width = maxFlagCol
+	}
+
+	for _, o := range opts {
+		switch {
+		case o.desc == "":
+			fmt.Fprintf(w, "    %s%s%s\n", chestGold, o.name, chestReset)
+		case len(o.name) > width:
+			fmt.Fprintf(w, "    %s%s%s\n", chestGold, o.name, chestReset)
+			fmt.Fprintf(w, "        %s\n", o.desc)
+		default:
+			fmt.Fprintf(w, "    %s%-*s%s  %s\n", chestGold, width, o.name, chestReset, o.desc)
+		}
+	}
+}
+
 func printManPage(t manTopic) {
 	bold := "\x1b[1m"
 	reset := "\x1b[0m"
 	cyan := "\x1b[38;5;75m"
-	gold := "\x1b[38;5;220m"
 	green := "\x1b[38;5;114m"
 	dim := "\x1b[38;5;246m"
 
@@ -632,14 +686,7 @@ func printManPage(t manTopic) {
 
 	if len(t.Options) > 0 {
 		fmt.Printf("%sOPTIONS%s\n", bold, reset)
-		for _, opt := range t.Options {
-			parts := strings.SplitN(opt, "  ", 2)
-			if len(parts) == 2 {
-				fmt.Printf("    %s%-24s%s %s\n", gold, parts[0], reset, parts[1])
-			} else {
-				fmt.Printf("    %s%s%s\n", gold, opt, reset)
-			}
-		}
+		renderManOptions(os.Stdout, t.Options)
 		fmt.Println()
 	}
 

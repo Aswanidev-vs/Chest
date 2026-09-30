@@ -76,11 +76,23 @@ func TestRateSurvivesACTransition(t *testing.T) {
 	}
 
 	r := rateOf(samples, p)
-	if r.Stable {
-		t.Error("a window spanning a power source change must not report a rate")
+	// The window may report a rate once it has refilled from the samples taken
+	// after the change, but the window it reports must not reach back across
+	// the change. Demanding no rate at all was the wrong assertion, because the
+	// estimator satisfied it by keeping the change in the window and refusing
+	// on every subsequent call, which is the permanent failure the package's
+	// own regression test condemns. These checks fail against that behaviour,
+	// so they pin the invariant the old assertion could only satisfy by
+	// accident.
+	if r.Samples > len(samples)-300 {
+		t.Errorf("the reported figure covers %d readings, more than the %d taken after the transition, so the window spans the power source change",
+			r.Samples, len(samples)-300)
 	}
-	if r.PctPerHour != 0 {
-		t.Errorf("a rejected window must report no rate, got %.2f", r.PctPerHour)
+	if r.Span > time.Duration(len(samples)-301)*2*time.Second {
+		t.Errorf("span %s reaches back across the transition at sample 300", r.Span)
+	}
+	if !r.Stable {
+		t.Fatalf("the window should refill from the post-transition samples and stabilise, got %+v", r)
 	}
 }
 

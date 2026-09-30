@@ -23,17 +23,16 @@ var (
 )
 
 // ANSI colors for the text tagline
-const (
-	ansiReset = "\x1b[0m"
-	ansiGreen = "\x1b[38;2;74;212;66m"   // #4AD442
-	ansiGray  = "\x1b[38;2;150;153;155m" // #96999B
-)
+// const (
+// 	ansiReset = "\x1b[0m"
+// 	ansiGreen = "\x1b[38;2;74;212;66m"   // #4AD442
+// )
 
 // ============================================================
 // Public
 // ============================================================
 
-// RenderChestLogo renders the pixel art logo followed by the ANSI tagline.
+// RenderChestLogo renders the pixel art logo followed by the ANSI prompt marker.
 func RenderChestLogo() string {
 	width := terminalWidth()
 	if width < 45 {
@@ -41,9 +40,9 @@ func RenderChestLogo() string {
 	}
 
 	logo := renderImage(buildLogoImage())
-	tagline := renderTaglineText()
+	// tagline := renderTaglineText()
 
-	return logo + "\n\n" + tagline
+	return logo
 }
 
 // ============================================================
@@ -173,18 +172,10 @@ func drawWordmark(img *image.RGBA, startX, y int) {
 // Native ANSI Text Tagline
 // ============================================================
 
-func renderTaglineText() string {
-	prompt := ansiGreen + ">_" + ansiReset
-	dot := ansiGreen + " • " + ansiReset
-
-	parts := []string{"SORT", "INDEX", "FIND", "ORGANIZE"}
-	var coloredParts []string
-	for _, p := range parts {
-		coloredParts = append(coloredParts, ansiGray+p+ansiReset)
-	}
-
-	return "  " + prompt + "  " + strings.Join(coloredParts, dot)
-}
+// func renderTaglineText() string {
+// 	prompt := ansiGreen + ">_" + ansiReset
+// 	return "  " + prompt
+// }
 
 // ============================================================
 // Transparent Half-Block Terminal Renderer
@@ -256,7 +247,7 @@ func setPixel(img *image.RGBA, x, y int, c color.Color) {
 func renderTinyLogo() string {
 	return strings.Join([]string{
 		"  ▣ CHEST",
-		renderTaglineText(),
+		// // renderTaglineText(),
 	}, "\n")
 }
 

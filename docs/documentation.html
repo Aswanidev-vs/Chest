@@ -832,6 +832,7 @@ Continue? [y/N]: y
 
           <h3 id="cmd-battery">chest battery</h3>
           <p>Reports battery charge, power state, and drain rate. Aliased as <code>power</code> and <code>batt</code>. With no flags it takes a single reading; <code>--record</code> and <code>--daemon</code> build the history database that the period reports (<code>--day</code>, <code>--week</code>, <code>--month</code>, <code>--year</code>) read back. Readers are per-platform, and every report names the source it read from.</p>
+          <p>Several flags only mean something alongside another one &mdash; <code>--apps</code> apportions activity over a window, <code>--top</code> sizes the <code>--apps</code> list, <code>--interval</code> sets a sampling rate, and <code>--db</code> names the history database. Given on their own they say which mode they need rather than printing a report identical to a run without them.</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">battery</span>                       <span class="t-comment"># Single reading</span>
@@ -854,7 +855,7 @@ Continue? [y/N]: y
               <tr>
                 <td><span class="flag-badge">--record</span></td>
                 <td>boolean</td>
-                <td>Append each reading to the history database.</td>
+                <td>Append each reading to the history database. Works on its own: <code>battery --record</code> records the single reading it takes.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--seconds &lt;duration&gt;</span></td>
@@ -864,7 +865,7 @@ Continue? [y/N]: y
               <tr>
                 <td><span class="flag-badge">--interval &lt;duration&gt;</span></td>
                 <td>duration</td>
-                <td>Sampling interval while measuring. Default <code>2s</code>.</td>
+                <td>Sampling interval while measuring. Default <code>2s</code>. Needs a mode that measures: <code>--seconds</code>, <code>--realtime</code> or <code>--daemon</code>. The sampler floors it at <code>5s</code> and reports the interval actually in force.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--json</span></td>
@@ -874,27 +875,27 @@ Continue? [y/N]: y
               <tr>
                 <td><span class="flag-badge">--low &lt;pct&gt;</span></td>
                 <td>int</td>
-                <td>Report charge at or below this percentage as low. <code>0</code> disables the warning.</td>
+                <td>Report charge at or below this percentage as low. <code>0</code> disables the warning. Must be <code>0</code>&ndash;<code>100</code>.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--fail-under &lt;pct&gt;</span></td>
                 <td>int</td>
-                <td>Exit with code 3 when charge is at or below this percentage, for scripted checks. <code>0</code> disables it.</td>
+                <td>Exit with code 3 when charge is at or below this percentage, for scripted checks. <code>0</code> disables it. Must be <code>0</code>&ndash;<code>100</code>.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--db &lt;path&gt;</span></td>
                 <td>string</td>
-                <td>History database path. Default <code>~/.chest/battery.db</code>.</td>
+                <td>History database path. Default <code>~/.chest/battery.db</code>. Names where history is read or written, so it needs <code>--record</code> or a period flag.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--apps</span></td>
                 <td>boolean</td>
-                <td>Report per-application activity apportioned from measured CPU and I/O. An <strong>estimate</strong>, see below.</td>
+                <td>Report per-application activity apportioned from measured CPU and I/O. An <strong>estimate</strong>, see below. Needs a window to apportion over: a period flag or <code>--seconds</code>.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--top &lt;n&gt;</span></td>
                 <td>int</td>
-                <td>How many applications to list with <code>--apps</code>. Default <code>5</code>.</td>
+                <td>How many applications to list with <code>--apps</code>. Default <code>5</code>, minimum <code>1</code>. Only meaningful alongside <code>--apps</code>.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--daemon</span></td>

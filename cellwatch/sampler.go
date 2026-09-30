@@ -81,6 +81,11 @@ func NewSampler(cfg SamplerConfig) (*Sampler, error) {
 	}, nil
 }
 
+// Interval reports the sampling period actually in force, which is the
+// configured interval raised to the 5s floor. A caller that displays a
+// requested interval rather than this one will misreport what it is doing.
+func (s *Sampler) Interval() time.Duration { return s.interval }
+
 // Run samples until the context is cancelled or the process is interrupted, and
 // returns the number of readings recorded.
 //
