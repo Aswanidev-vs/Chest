@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -113,17 +114,38 @@ HISTORY reads what --record has written, into its own database at
 
 A historical report states its coverage. A range in which the sampler ran for
 two hours is reported as such rather than presented as a description of the
-month.`,
+month.
+
+Some flags only mean something alongside another one. --apps apportions
+activity over a window, --top sizes the list --apps produces, --interval sets a
+sampling rate while measuring, and --db names the history database. Given on
+their own, each says which mode it needs rather than printing a report
+indistinguishable from a run without it.`,
 		Example: `  chest battery
   chest battery --json
   chest battery --realtime
   chest battery --seconds 600
+  chest battery --seconds 600 --apps
+  chest battery --record
   chest battery --record --apps
   chest battery --record --daemon
   chest battery --week --apps
   chest battery --low 20`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Flags are checked before a reader is created or a database is
+			// opened, so a mistyped value costs nothing and cannot half-run the
+			// command against the machine.
+			if err := validateBatteryFlags(batteryFlagInput{
+				lowPct:    lowPct,
+				failUnder: failUnder,
+				top:       top,
+				seconds:   seconds,
+				interval:  interval,
+			}); err != nil {
+				return err
+			}
+
 			reader, err := cellwatch.NewReader()
 			if err != nil {
 				return err
@@ -166,10 +188,49 @@ month.`,
 			// reports state only. Measuring means waiting, and the user has to
 			// ask for that with a duration.
 			if seconds <= 0 {
+				// --apps apportions activity over an interval, and one reading
+				// has no interval. Saying so is better than accepting the flag
+				// and printing a report identical to a run without it, which is
+				// indistinguishable from the flag being broken.
+				if apps {
+					return errors.New("--apps apportions activity over a window, so it needs a period (--day, --week, --month, --year) or --seconds to measure one")
+				}
+				// --top only means something alongside --apps, so on its own it
+				// is a request for a list nothing will produce.
+				if cmd.Flags().Changed("top") {
+					return errors.New("--top sets how many applications --apps lists; use it with --apps")
+				}
+				// --interval only applies while measuring, and --db only names
+				// where to record. On a bare reading both are accepted and
+				// discarded, which is indistinguishable from a broken flag.
+				if cmd.Flags().Changed("interval") {
+					return errors.New("--interval sets the sampling rate while measuring; use it with --seconds, --realtime or --daemon")
+				}
+				if cmd.Flags().Changed("db") && !record {
+					return errors.New("--db names the history database; use it with --record or a period (--day, --week, --month, --year)")
+				}
+
 				st, err := reader.Read()
 				if err != nil {
 					return err
 				}
+
+				// The store is opened only when recording is asked for, so a
+				// plain read never creates a database file on disk. It is opened
+				// here as well as in the measuring path: --record on its own is
+				// a request to append this reading, and honouring it is the
+				// difference between the flag working and doing nothing at all.
+				if record {
+					store, err := cellwatch.Open(dbPath)
+					if err != nil {
+						return err
+					}
+					defer store.Close()
+					if err := store.Record(cmd.Context(), st); err != nil {
+						return fmt.Errorf("recording: %w", err)
+					}
+				}
+
 				r := cellwatch.Rate{Reason: "single reading; use --seconds to measure a rate"}
 				if err := emitBattery(out, st, r, lowPct, jsonOut); err != nil {
 					return err
@@ -202,6 +263,10 @@ month.`,
 			// sampling enumerates every process on the machine and that cost
 			// should not be paid by a run that will not use the result.
 			var attributor *cellwatch.Attributor
+			// appsTotal accumulates attribution across the window so the final
+			// report can list applications. Without it --apps stored rows that
+			// nothing on screen ever showed, which made the flag look broken.
+			var appsTotal []cellwatch.AppActivity
 			if apps {
 				attributor = cellwatch.NewAttributor()
 				// A first sample establishes the baseline; a second is needed
@@ -250,11 +315,13 @@ month.`,
 					if err := emitFinal(out, last, est.Rate(), lowPct, jsonOut); err != nil {
 						return err
 					}
+					printMeasuredApps(out, appsTotal, top, jsonOut)
 					return batteryExit(last, failUnder)
 				case <-deadline.C:
 					if err := emitFinal(out, last, est.Rate(), lowPct, jsonOut); err != nil {
 						return err
 					}
+					printMeasuredApps(out, appsTotal, top, jsonOut)
 					return batteryExit(last, failUnder)
 				case <-ticker.C:
 					st, err := reader.Read()
@@ -270,14 +337,15 @@ month.`,
 							return fmt.Errorf("recording: %w", err)
 						}
 					}
-					if attributor != nil && store != nil {
+					if attributor != nil {
 						if err := attributor.Sample(); err == nil {
 							// The rate is passed through so the stored
 							// per-application figure is drain rather than a bare
 							// share. A share with no rate behind it cannot be
 							// turned back into a cost later.
 							attributed := attributor.Attribute(est.Rate().PctPerHour)
-							if !attributed.Idle && len(attributed.Apps) > 0 {
+							appsTotal = accumulateApps(appsTotal, attributed.Apps)
+							if store != nil && !attributed.Idle && len(attributed.Apps) > 0 {
 								if err := store.Apps(cmd.Context(), time.Now(), attributed.Apps); err != nil {
 									return fmt.Errorf("recording apps: %w", err)
 								}
@@ -289,15 +357,15 @@ month.`,
 		},
 	}
 
-	cmd.Flags().BoolVar(&record, "record", false, "Append each reading to the battery history database")
+	cmd.Flags().BoolVar(&record, "record", false, "Append each reading to the battery history database (works on a single reading too)")
 	cmd.Flags().DurationVar(&seconds, "seconds", 0, "Measure over this long instead of taking a single reading")
-	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "Sampling interval while measuring")
+	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "Sampling interval while measuring (floored at 5s; needs --seconds, --realtime or --daemon)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output as machine-readable JSON")
-	cmd.Flags().IntVar(&lowPct, "low", 0, "Report charge at or below this percentage as low (0 disables)")
-	cmd.Flags().IntVar(&failUnder, "fail-under", 0, "Exit 3 when charge is at or below this percentage (0 disables)")
-	cmd.Flags().StringVar(&dbPath, "db", "", "Path to the history database (default: ~/.chest/battery.db)")
-	cmd.Flags().BoolVar(&apps, "apps", false, "Report per-application activity apportioned from CPU and I/O (ESTIMATE)")
-	cmd.Flags().IntVar(&top, "top", 5, "How many applications to list with --apps")
+	cmd.Flags().IntVar(&lowPct, "low", 0, "Report charge at or below this percentage as low (0-100, 0 disables)")
+	cmd.Flags().IntVar(&failUnder, "fail-under", 0, "Exit 3 when charge is at or below this percentage (0-100, 0 disables)")
+	cmd.Flags().StringVar(&dbPath, "db", "", "Path to the history database (default: ~/.chest/battery.db; needs --record or a period)")
+	cmd.Flags().BoolVar(&apps, "apps", false, "Report per-application activity apportioned from CPU and I/O (ESTIMATE; needs a window)")
+	cmd.Flags().IntVar(&top, "top", 5, "How many applications to list with --apps (minimum 1)")
 	cmd.Flags().BoolVar(&daemon, "daemon", false, "Keep recording in the foreground until Ctrl+C")
 	cmd.Flags().BoolVar(&realtime, "realtime", false, "Redraw the reading in place until Ctrl+C")
 
@@ -309,6 +377,63 @@ month.`,
 	cmd.Flags().BoolVar(&monthFlag, "month", false, "Report the current calendar month from history")
 	cmd.Flags().BoolVar(&yearFlag, "year", false, "Report the current calendar year from history")
 	return cmd
+}
+
+// batteryFlagInput is the unvalidated flag state of `chest battery`. It is a
+// plain struct rather than values threaded through the command body so the
+// rules below can be exercised as a pure function, with no reader, no terminal
+// and no database.
+type batteryFlagInput struct {
+	lowPct    int
+	failUnder int
+	top       int
+	seconds   time.Duration
+	interval  time.Duration
+}
+
+// validateBatteryFlags refuses a flag that cannot mean what it says.
+//
+// Each of these values reaches a comparison against a measured charge, a LIMIT
+// in a query, or a time.Ticker, and none of them fails loudly. --low -5
+// disables the warning, because the comparison is against a positive number.
+// --top 0 asks for no applications and gets none, which reads as "nothing was
+// running" rather than as a mistyped flag. --interval 0 panics inside
+// time.NewTicker, which is a crash rather than an error. A flag that was typed
+// and silently did nothing is worse than one that was refused.
+func validateBatteryFlags(in batteryFlagInput) error {
+	// Both percentages are compared against a charge reported between 0 and
+	// 100. Zero is the one value outside that range that still means something,
+	// because both flags document 0 as "off".
+	for _, p := range []struct {
+		name string
+		val  int
+	}{
+		{"--low", in.lowPct},
+		{"--fail-under", in.failUnder},
+	} {
+		if p.val < 0 || p.val > 100 {
+			return fmt.Errorf("%s must be a percentage between 0 and 100, got %d", p.name, p.val)
+		}
+	}
+
+	// --top has no "off" value: it says how many applications to list, and zero
+	// is not a count.
+	if in.top < 1 {
+		return fmt.Errorf("--top must be at least 1, got %d", in.top)
+	}
+
+	// A non-positive interval reaches time.NewTicker, which panics instead of
+	// returning an error, so it is refused here rather than caught later.
+	if in.interval <= 0 {
+		return fmt.Errorf("--interval must be a positive duration, got %s", in.interval)
+	}
+
+	// A negative window is a typo, not a request, and honouring it by falling
+	// back to a single reading looks like the command ignored the flag.
+	if in.seconds < 0 {
+		return fmt.Errorf("--seconds must not be negative, got %s", in.seconds)
+	}
+	return nil
 }
 
 // batteryHistory answers a period question from recorded history.
@@ -398,7 +523,12 @@ func batteryDaemon(cmd *cobra.Command, reader cellwatch.Reader, interval time.Du
 	}
 
 	if !jsonOut {
-		fmt.Fprintf(cmd.ErrOrStderr(), "\n%sRecording battery history. Press Ctrl+C to stop.%s\n", chestDim, chestReset)
+		// The sampler floors the interval at 5s, so the value the user asked for
+		// is not always the value in force. Stating the effective interval is
+		// what keeps a --interval 1s request from silently recording five times
+		// less often than asked.
+		fmt.Fprintf(cmd.ErrOrStderr(), "\n%sRecording battery history every %s. Press Ctrl+C to stop.%s\n",
+			chestDim, s.Interval().Round(time.Second), chestReset)
 	}
 	n, err := s.Run(cmd.Context())
 	stats := s.Stats()
@@ -417,6 +547,67 @@ func batteryDaemon(cmd *cobra.Command, reader cellwatch.Reader, interval time.Du
 
 func emitFinal(out io.Writer, st cellwatch.Status, r cellwatch.Rate, lowPct int, jsonOut bool) error {
 	return emitBattery(out, st, r, lowPct, jsonOut)
+}
+
+// accumulateApps folds one attribution pass into a running total, so a
+// measurement spread over many intervals reports the whole window rather than
+// whichever interval happened to be sampled last.
+//
+// CPU and I/O are summed because they are measured quantities that accumulate.
+// Share and PctPerHour are averaged rather than summed: they are proportions of
+// a window, and adding them would report a total above 100% for a run that
+// spans several of them.
+func accumulateApps(total, add []cellwatch.AppActivity) []cellwatch.AppActivity {
+	if len(add) == 0 {
+		return total
+	}
+	byName := make(map[string]int, len(total))
+	for i, a := range total {
+		byName[a.Name] = i
+	}
+	for _, a := range add {
+		if i, ok := byName[a.Name]; ok {
+			prior := total[i]
+			prior.CPUSeconds += a.CPUSeconds
+			prior.ReadBytes += a.ReadBytes
+			prior.WriteBytes += a.WriteBytes
+			total[i] = prior
+			continue
+		}
+		byName[a.Name] = len(total)
+		total = append(total, a)
+	}
+	return total
+}
+
+// printMeasuredApps lists what --apps attributed during a measurement.
+//
+// --apps used to be accepted and then never shown on this path: the attribution
+// was written to the store, but only a period report ever read it back, so
+// `battery --seconds 1h --apps` printed a battery table and nothing else.
+//
+// jsonOut suppresses it: a JSON consumer parses the stream, and a human table
+// appended after the object is not something json.Unmarshal can skip.
+func printMeasuredApps(out io.Writer, apps []cellwatch.AppActivity, top int, jsonOut bool) {
+	if len(apps) == 0 || jsonOut {
+		return
+	}
+	ranked := make([]cellwatch.AppActivity, len(apps))
+	copy(ranked, apps)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		return ranked[i].CPUSeconds > ranked[j].CPUSeconds
+	})
+	if top > 0 && len(ranked) > top {
+		ranked = ranked[:top]
+	}
+
+	fmt.Fprintf(out, "\n  %sTOP %d APPLICATIONS%s  %s(ESTIMATE, from measured CPU and I/O)%s\n",
+		chestPrimary, len(ranked), chestReset, chestDim, chestReset)
+	for i, a := range ranked {
+		fmt.Fprintf(out, "  %s%2d.%s %s%-28s%s %s%7.1f s CPU%s\n",
+			chestDim, i+1, chestReset, chestPrimary, truncate(a.Name, 28), chestReset,
+			chestCyan, a.CPUSeconds, chestReset)
+	}
 }
 
 // thresholdError reports that a --fail-under threshold was met, so a script
@@ -677,6 +868,7 @@ func batteryRealtime(cmd *cobra.Command, reader cellwatch.Reader, interval time.
 
 	var last cellwatch.Status
 	first := true
+	prevLines := 0
 	for {
 		st, err := reader.Read()
 		if err != nil {
@@ -717,7 +909,8 @@ func batteryRealtime(cmd *cobra.Command, reader cellwatch.Reader, interval time.
 				return err
 			}
 		} else if live {
-			printBatteryLive(out, st, est.Rate(), first)
+			printBatteryLive(out, st, est.Rate(), first, prevLines)
+			prevLines = liveFrameLines(st)
 		} else {
 			printBatteryTable(out, st, est.Rate(), 0)
 		}
@@ -741,23 +934,25 @@ func batteryRealtime(cmd *cobra.Command, reader cellwatch.Reader, interval time.
 // The previous frame is erased by moving the cursor up and clearing each line
 // rather than by clearing the screen, so a reading that is one row shorter than
 // its predecessor cannot leave a stale line behind.
-func printBatteryLive(w io.Writer, s cellwatch.Status, r cellwatch.Rate, first bool) {
+//
+// prevLines is how many lines the frame before this one occupied. It has to be
+// the *previous* frame's height, not this one's: a reading gains and loses rows
+// as the platform starts and stops reporting fields, and rewinding by the
+// current row count would strand a row whenever the two differ.
+func printBatteryLive(w io.Writer, s cellwatch.Status, r cellwatch.Rate, first bool, prevLines int) {
 	rows := buildBatteryRows(s, r, 0)
 	var b strings.Builder
 
-	// A frame occupies one line per row plus a two-line footer, and the cursor
-	// is left on the last of them. The next frame therefore rewinds exactly that
-	// many lines and rewrites them.
+	// The rewind comes from the caller because it must describe the frame that
+	// is already on screen, not this one. See liveFrameLines.
 	//
 	// The clear and the content are emitted in the same pass rather than as a
 	// separate clearing sweep. Clearing first would emit a newline per line
 	// before the content, so the cursor would end up further down than the
 	// rewind count accounts for and the frame would creep down the screen on
 	// every refresh.
-	const footerLines = 2
-	lines := len(rows) + footerLines
-	if !first {
-		fmt.Fprintf(&b, "\x1b[%dA", lines)
+	if !first && prevLines > 0 {
+		fmt.Fprintf(&b, "\x1b[%dA", prevLines)
 	}
 
 	// Clearing to end of line handles a row that shrank between frames.
@@ -781,8 +976,27 @@ func printBatteryLive(w io.Writer, s cellwatch.Status, r cellwatch.Rate, first b
 			chestDim, row.Detail, chestReset)
 	}
 	emit("  %supdating every %s · Ctrl+C to stop%s", chestDim, "…", chestReset)
+	// The clock is emitted through the same helper as every other line. Writing
+	// it directly left it as the one row with no erase-line, so a shorter clock
+	// left characters behind and the frame's own line count no longer matched
+	// the rewind the next frame issues.
+	emit("  %s%s%s", chestDim, time.Now().Format("15:04:05"), chestReset)
+	// Erase anything below the frame. A reading that just got shorter -- a field
+	// the platform stopped reporting, say -- leaves the taller frame's last rows
+	// on screen, because the rewind only brings the cursor back to where this
+	// frame starts and never touches what is underneath it.
+	b.WriteString("\x1b[0J")
 	fmt.Fprint(w, b.String())
-	fmt.Fprintf(w, "  %s%s%s", chestDim, time.Now().Format("15:04:05"), chestReset)
+}
+
+// liveFrameLines is how many lines the cursor must move up to return to where a
+// frame started drawing. Every emitted line ends in a newline, so a frame of N
+// lines leaves the cursor N rows below its own first row; rewinding N lands
+// back on that first row. Rewinding N+1 only appears to work because the
+// terminal clamps at the top of the screen, and on a frame that starts partway
+// down it would erase the line above it.
+func liveFrameLines(s cellwatch.Status) int {
+	return len(buildBatteryRows(s, cellwatch.Rate{}, 0)) + 2
 }
 
 // isTerminal reports whether f is an interactive terminal, using the same
@@ -801,12 +1015,16 @@ func isTerminal(f *os.File) bool {
 func printBatteryTable(w io.Writer, s cellwatch.Status, r cellwatch.Rate, lowPct int) {
 	const inner = 32
 	fmt.Fprintf(w, "\n  %s+%s%s+%s\n", chestDim, chestReset, strings.Repeat("-", inner), chestDim)
+	// Centring is a left pad plus a right pad. Left-padding alone leaves the
+	// title hanging past the right-hand border, which is what the box rule
+	// above is there to prevent.
 	pad := func(text string) string {
-		n := (inner - len([]rune(text))) / 2
-		if n < 0 {
-			n = 0
+		n := len([]rune(text))
+		if n > inner {
+			n = inner
 		}
-		return strings.Repeat(" ", n) + text
+		left := (inner - n) / 2
+		return strings.Repeat(" ", left) + text + strings.Repeat(" ", inner-n-left)
 	}
 	fmt.Fprintf(w, "  %s|%s%s%s%s%s|%s\n", chestDim, chestReset, chestPrimary,
 		pad("CHEST BATTERY"), chestReset, chestDim, chestReset)
@@ -939,8 +1157,16 @@ func printBatteryJSON(w io.Writer, s cellwatch.Status, r cellwatch.Rate) error {
 // two-hour sample for a monthly total.
 func printBatteryHistory(w io.Writer, rep *cellwatch.UsageReport, p cellwatch.Period, topN int, series map[string][]cellwatchPoint, names []string) {
 	fmt.Fprintf(w, "\n  %s+%s%s+%s\n", chestDim, chestReset, strings.Repeat("-", 32), chestDim)
-	fmt.Fprintf(w, "  %s|%s%sBATTERY - %s%s%s|%s\n", chestDim, chestReset, chestPrimary,
-		strings.ToUpper(p.String()), strings.Repeat(" ", 20-len(p.String())), chestDim, chestReset)
+	// The title is centred inside the same 32-column rule the single-reading
+	// banner uses. Computing the right pad from the title length keeps the two
+	// boxes the same width, and a length guard keeps the repeat count
+	// non-negative if a period name ever grows.
+	title := "BATTERY - " + strings.ToUpper(p.String())
+	if n := len([]rune(title)); n < 32 {
+		left := (32 - n) / 2
+		title = strings.Repeat(" ", left) + title + strings.Repeat(" ", 32-n-left)
+	}
+	fmt.Fprintf(w, "  %s|%s%s%s%s|%s\n", chestDim, chestReset, chestPrimary, title, chestDim, chestReset)
 	fmt.Fprintf(w, "  %s+%s%s+%s\n\n", chestDim, chestReset, strings.Repeat("-", 32), chestDim)
 
 	cov := rep.Coverage
