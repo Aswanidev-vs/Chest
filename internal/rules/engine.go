@@ -67,23 +67,27 @@ func matchRule(rule models.Rule, file models.File) (bool, string) {
 	// Check helper MinSize
 	if rule.MinSize != "" {
 		minBytes, err := ParseSize(rule.MinSize)
-		if err == nil {
-			if file.Size < minBytes {
-				return false, ""
-			}
-			reasons = append(reasons, fmt.Sprintf("size >= %s", rule.MinSize))
+		if err != nil {
+			// Ignoring the parse error would let a typo'd size silently widen
+			// the rule to every file; ValidateRule reports it up front.
+			return false, ""
 		}
+		if file.Size < minBytes {
+			return false, ""
+		}
+		reasons = append(reasons, fmt.Sprintf("size >= %s", rule.MinSize))
 	}
 
 	// Check helper MaxSize
 	if rule.MaxSize != "" {
 		maxBytes, err := ParseSize(rule.MaxSize)
-		if err == nil {
-			if file.Size > maxBytes {
-				return false, ""
-			}
-			reasons = append(reasons, fmt.Sprintf("size <= %s", rule.MaxSize))
+		if err != nil {
+			return false, ""
 		}
+		if file.Size > maxBytes {
+			return false, ""
+		}
+		reasons = append(reasons, fmt.Sprintf("size <= %s", rule.MaxSize))
 	}
 
 	// Check explicit conditions
@@ -103,6 +107,10 @@ func matchRule(rule models.Rule, file models.File) (bool, string) {
 }
 
 func evaluateCondition(cond models.Condition, file models.File) (bool, string) {
+	if key, ok := metaFieldKey(cond.Field); ok {
+		return evaluateMetaCondition(cond, key, file)
+	}
+
 	switch cond.Field {
 	case models.FieldExtension, models.FieldFormat:
 		val := strings.ToLower(strings.TrimPrefix(cond.Value, "."))
@@ -203,6 +211,57 @@ func evaluateCondition(cond models.Condition, file models.File) (bool, string) {
 	}
 
 	return false, ""
+}
+
+// metaPrefix marks a condition field that reads an embedded metadata key,
+// e.g. "meta:camera". "meta" plus the key mirrors the meta.<key> DSL spelling.
+const metaPrefix = "meta:"
+
+// wellKnownMetaFields are the metadata keys addressable by a bare field name
+// in the rule DSL; every other key is reachable via the meta.<key> prefix.
+var wellKnownMetaFields = map[string]struct{}{
+	"camera": {}, "artist": {}, "album": {}, "genre": {}, "title": {},
+	"codec": {}, "composer": {}, "encoder": {}, "software": {},
+	"duration": {}, "width": {}, "height": {}, "comment": {},
+}
+
+// metaFieldKey reports whether field names an embedded metadata key and returns
+// that key. A missing key matches the empty string, so "!=" matches and "="
+// does not.
+func metaFieldKey(field models.TargetField) (string, bool) {
+	key := strings.TrimPrefix(string(field), metaPrefix)
+	if key == "" || key == string(field) {
+		return "", false
+	}
+	return key, true
+}
+
+// evaluateMetaCondition applies the name-field string semantics to a metadata
+// value, so camera=Canon and mime/name style operators behave identically.
+func evaluateMetaCondition(cond models.Condition, key string, file models.File) (bool, string) {
+	subject := file.Metadata[key]
+	matched := false
+	switch cond.Operator {
+	case models.OpEqual:
+		matched = strings.EqualFold(subject, cond.Value)
+	case models.OpNotEqual:
+		matched = !strings.EqualFold(subject, cond.Value)
+	case models.OpContains:
+		matched = strings.Contains(strings.ToLower(subject), strings.ToLower(cond.Value))
+	case models.OpStartsWith:
+		matched = strings.HasPrefix(strings.ToLower(subject), strings.ToLower(cond.Value))
+	case models.OpEndsWith:
+		matched = strings.HasSuffix(strings.ToLower(subject), strings.ToLower(cond.Value))
+	case models.OpGlob:
+		m, _ := filepath.Match(strings.ToLower(cond.Value), strings.ToLower(subject))
+		matched = m
+	case models.OpRegex:
+		r, err := regexp.Compile(cond.Value)
+		if err == nil {
+			matched = r.MatchString(subject)
+		}
+	}
+	return matched, fmt.Sprintf("%s%s %s %s", metaPrefix, key, cond.Operator, cond.Value)
 }
 
 func evaluateDateCondition(cond models.Condition, fileDate time.Time) (bool, string) {
@@ -398,6 +457,17 @@ func mapField(fieldStr string) (models.TargetField, error) {
 	case "mime", "mimetype":
 		return models.FieldMIME, nil
 	default:
+		lower := strings.ToLower(fieldStr)
+		// Both the DSL spelling (meta.<key>) and the canonical field form
+		// (meta:<key>), so FormatRule output re-parses.
+		for _, prefix := range []string{"meta.", metaPrefix} {
+			if key, ok := strings.CutPrefix(lower, prefix); ok && key != "" {
+				return models.TargetField(metaPrefix + key), nil
+			}
+		}
+		if _, ok := wellKnownMetaFields[lower]; ok {
+			return models.TargetField(metaPrefix + lower), nil
+		}
 		return "", fmt.Errorf("unknown field '%s'", fieldStr)
 	}
 }
