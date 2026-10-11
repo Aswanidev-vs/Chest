@@ -612,7 +612,7 @@ Reports problems that would otherwise be silently ignored at evaluation time, su
 unparseable size values and unsupported field/operator combinations.`,
 		Examples: []string{
 			"chest rule check ~/Downloads -p media               Validate a preset",
-			"chest rule check . --rule \"ext=jpg min_size=abc -> Images\"   Catch the invalid size",
+			"chest rule check . --rule \"name =~ '[unclosed' -> Images\"   Catch the invalid regex",
 			"chest rule check ~/Code                              Validate discovered chest.toml rules",
 		},
 		SeeAlso: []string{"sort", "repl"},

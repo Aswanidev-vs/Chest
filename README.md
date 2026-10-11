@@ -283,7 +283,7 @@ Validate any configuration (or ad-hoc rule set) without touching a single file:
 
 ```bash
 chest rule check ~/Downloads -p media
-chest rule check . --rule "ext=jpg min_size=abc -> Images"
+chest rule check . --rule "name =~ '[unclosed' -> Images"
 ```
 
 ---

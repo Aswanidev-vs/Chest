@@ -326,9 +326,9 @@ conditions = [{ field = "camera", operator = "=", value = "Canon" }]</code></pre
               <pre><code>$ chest rule check ~/Downloads -p media
 &#10003; 12 rule(s) validated, no problems found.
 
-$ chest rule check . --rule "ext=jpg min_size=abc -> Images"
+$ chest rule check . --rule "name =~ '[unclosed' -> Images"
 1 problem(s) found in 1 rule(s):
-  &bull; rule 'ext=jpg min_size=abc -> Images': invalid min_size 'abc'</code></pre>
+  &bull; rule 'name =~ '[unclosed' -> Images': invalid regex "[unclosed" for field "name"</code></pre>
             </div>
           </div>
 

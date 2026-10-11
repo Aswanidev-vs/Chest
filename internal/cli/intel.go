@@ -421,6 +421,9 @@ func newDuplicatesCmd() *cobra.Command {
 			}
 
 			if jsonOutput || csvOutput || outPath != "" {
+				if groups == nil {
+					groups = []indexer.DuplicateGroup{}
+				}
 				return emitReport(cmd.OutOrStdout(), groups, csvRowsForDuplicates(groups), jsonOutput, csvOutput, outPath)
 			}
 
