@@ -161,12 +161,40 @@ func (w *Watcher) Start(ctx context.Context, cb func(ev Event)) error {
 
 	var (
 		mu      sync.Mutex
-		pending = make(map[string]*time.Timer)
+		pending = make(map[string]struct{})
+		// debounceTimer fires once after a burst of Create/Write events so the
+		// whole pending group is planned and recorded as a single history entry
+		// instead of one entry per file.
+		debounceTimer *time.Timer
 	)
+
+	// scheduleBatch (re)arms the single debounce timer that drains every pending
+	// path and hands them to processBatch as one batch.
+	scheduleBatch := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if debounceTimer != nil {
+			debounceTimer.Stop()
+		}
+		debounceTimer = time.AfterFunc(w.opts.Debounce, func() {
+			mu.Lock()
+			paths := make([]string, 0, len(pending))
+			for p := range pending {
+				paths = append(paths, p)
+			}
+			pending = make(map[string]struct{})
+			mu.Unlock()
+			if len(paths) == 0 {
+				return
+			}
+			w.processBatch(paths, cb)
+		})
+	}
 
 	// Optional initial sweep: organize files already present in the folder
 	// before entering watch mode. This makes `watch --initial` behave like a
-	// one-time sort followed by continuous monitoring of new arrivals.
+	// one-time sort followed by continuous monitoring of new arrivals. The
+	// whole sweep runs as one batch so it records a single history entry.
 	if w.opts.Initial {
 		sc := scanner.New(scanner.ScanOptions{
 			Recursive:      false, // fsnotify only monitors the top-level directory
@@ -175,10 +203,12 @@ func (w *Watcher) Start(ctx context.Context, cb func(ev Event)) error {
 			ExtractDates:   w.opts.DateSource != "modified",
 		})
 		existing, serr := sc.Scan(targetDir)
-		if serr == nil {
-			for _, ex := range existing {
-				w.processFile(ex.Path, cb)
+		if serr == nil && len(existing) > 0 {
+			paths := make([]string, len(existing))
+			for i, ex := range existing {
+				paths[i] = ex.Path
 			}
+			w.processBatch(paths, cb)
 		}
 	}
 
@@ -224,18 +254,10 @@ func (w *Watcher) Start(ctx context.Context, cb func(ev Event)) error {
 			}
 
 			mu.Lock()
-			if timer, exists := pending[path]; exists {
-				timer.Stop()
-			}
-
-			pending[path] = time.AfterFunc(w.opts.Debounce, func() {
-				mu.Lock()
-				delete(pending, path)
-				mu.Unlock()
-
-				w.processFile(path, cb)
-			})
+			pending[path] = struct{}{}
 			mu.Unlock()
+
+			scheduleBatch()
 
 		case err, ok := <-fsw.Errors:
 			if !ok {
@@ -248,65 +270,80 @@ func (w *Watcher) Start(ctx context.Context, cb func(ev Event)) error {
 	}
 }
 
-func (w *Watcher) processFile(filePath string, cb func(ev Event)) {
-	info, err := os.Stat(filePath)
-	if err != nil || info.IsDir() {
+// processBatch plans and executes a group of files as one unit: a single
+// planner.Plan, a single organizer.Execute, and therefore a single history
+// entry for the whole debounced batch.
+func (w *Watcher) processBatch(paths []string, cb func(ev Event)) {
+	files := make([]models.File, 0, len(paths))
+	for _, filePath := range paths {
+		info, err := os.Stat(filePath)
+		if err != nil || info.IsDir() {
+			continue
+		}
+
+		name := info.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
+		relPath, _ := filepath.Rel(w.opts.Directory, filePath)
+
+		file := models.File{
+			Path:      filePath,
+			RelPath:   relPath,
+			Name:      name,
+			Extension: ext,
+			Size:      info.Size(),
+			ModTime:   info.ModTime(),
+			IsDir:     false,
+		}
+		if meta, err := metadata.Extract(filePath, ext); err == nil {
+			if meta.Format != "" {
+				file.Format = meta.Format
+			}
+			if file.MIMEType == "" {
+				file.MIMEType = meta.MIMEType
+			}
+			if len(meta.Fields) > 0 {
+				file.Metadata = meta.Fields
+			}
+			if w.opts.DateSource != "modified" && !meta.Date.Date.IsZero() {
+				file.TakenDate = &meta.Date.Date
+				file.TakenDateSource = meta.Date.Source
+			}
+		}
+
+		// External enrichment (e.g. metadata plugins) runs last so it can fill
+		// gaps or override values the built-in extractors produced.
+		if w.opts.EnrichFunc != nil {
+			if enriched, ok := w.opts.EnrichFunc(file); ok {
+				file = enriched
+			}
+		}
+		files = append(files, file)
+	}
+
+	if len(files) == 0 {
 		return
 	}
 
-	name := info.Name()
-	if strings.HasPrefix(name, ".") {
-		return
-	}
-
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(name), "."))
-	relPath, _ := filepath.Rel(w.opts.Directory, filePath)
-
-	file := models.File{
-		Path:      filePath,
-		RelPath:   relPath,
-		Name:      name,
-		Extension: ext,
-		Size:      info.Size(),
-		ModTime:   info.ModTime(),
-		IsDir:     false,
-	}
-	if meta, err := metadata.Extract(filePath, ext); err == nil {
-		if meta.Format != "" {
-			file.Format = meta.Format
-		}
-		if file.MIMEType == "" {
-			file.MIMEType = meta.MIMEType
-		}
-		if len(meta.Fields) > 0 {
-			file.Metadata = meta.Fields
-		}
-		if w.opts.DateSource != "modified" && !meta.Date.Date.IsZero() {
-			file.TakenDate = &meta.Date.Date
-			file.TakenDateSource = meta.Date.Source
-		}
-	}
-
-	// External enrichment (e.g. metadata plugins) runs last so it can fill
-	// gaps or override values the built-in extractors produced.
-	if w.opts.EnrichFunc != nil {
-		if enriched, ok := w.opts.EnrichFunc(file); ok {
-			file = enriched
-		}
-	}
-
-	plan, err := w.planner.Plan(w.opts.Directory, []models.File{file})
+	plan, err := w.planner.Plan(w.opts.Directory, files)
 	if err != nil || len(plan.Operations) == 0 {
 		return
 	}
 
-	var execErr error
 	if !w.opts.DryRun {
-		_, execErr = organizer.Execute(plan, w.history, nil)
+		// One Execute => one history entry covering the whole batch.
+		organizer.Execute(plan, w.history, nil)
 	}
 
+	// Emit one event per planned operation so live per-file feedback is
+	// unchanged from the previous per-file behavior.
 	if cb != nil {
-		cb(Event{Kind: KindOrganized, Name: name, Dest: plan.Operations[0].Destination, Err: execErr})
+		for _, op := range plan.Operations {
+			cb(Event{Kind: KindOrganized, Name: baseName(op.Source), Dest: op.Destination})
+		}
 	}
 }
 
