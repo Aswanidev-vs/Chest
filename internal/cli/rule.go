@@ -18,10 +18,19 @@ type ruleCheckFlags struct {
 }
 
 func newRuleCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rule",
+		Short: "Rule utilities",
+	}
+	cmd.AddCommand(newRuleCheckCmd())
+	return cmd
+}
+
+func newRuleCheckCmd() *cobra.Command {
 	f := ruleCheckFlags{}
 
 	cmd := &cobra.Command{
-		Use:   "rule check [directory]",
+		Use:   "check [directory]",
 		Short: "Validate a rule set without scanning or moving files",
 		Long: `Validate the rules that would apply to a directory — from flags, presets
 and any chest.toml discovered by walking up from the target — and report every
