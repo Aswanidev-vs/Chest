@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,6 +33,7 @@ type sortFlags struct {
 	name            string
 	preset          string
 	dryRun          bool
+	jsonPlan        bool
 	yes             bool
 	recursive       bool
 	verbose         bool
@@ -279,6 +281,14 @@ func newSortCmd() *cobra.Command {
 
 			// Handle Dry Run
 			if f.dryRun {
+				if f.jsonPlan {
+					data, err := json.MarshalIndent(plan, "", "  ")
+					if err != nil {
+						return fmt.Errorf("error serializing plan: %w", err)
+					}
+					fmt.Println(string(data))
+					return nil
+				}
 				printDryRun(plan, absTarget)
 				return nil
 			}
@@ -346,6 +356,12 @@ func newSortCmd() *cobra.Command {
 				if result.HistoryID > 0 {
 					fmt.Printf("History recorded as operation #%d (use 'chest undo' to revert).\n", result.HistoryID)
 				}
+				for _, e := range result.Errors {
+					fmt.Printf("\x1b[38;5;196m✖ %s\x1b[0m\n", e)
+				}
+				if len(result.Errors) > 0 {
+					fmt.Printf("\x1b[38;5;214m%d file(s) could not be organized; the run is recorded as partial in history.\x1b[0m\n", len(result.Errors))
+				}
 			}
 
 			return nil
@@ -363,6 +379,7 @@ func newSortCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.name, "name", "", "Move all matched files flat into this folder inside the target directory (e.g. --name \"Anime\" -> Anime/*.mp4); cannot be combined with --into")
 	cmd.Flags().StringVarP(&f.preset, "preset", "p", "", "Use predefined preset (downloads, media, documents, developer, photos)")
 	cmd.Flags().BoolVarP(&f.dryRun, "dry-run", "n", false, "Preview changes without modifying filesystem")
+	cmd.Flags().BoolVar(&f.jsonPlan, "json", false, "With --dry-run, print the plan as JSON (operations, folders, conflicts)")
 	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "Skip confirmation prompt")
 	cmd.Flags().BoolVarP(&f.recursive, "recursive", "r", false, "Include subdirectories")
 	cmd.Flags().BoolVarP(&f.verbose, "verbose", "v", false, "Detailed output")
@@ -396,6 +413,24 @@ func printDryRun(plan models.Plan, root string) {
 
 	fmt.Println("────────────────────────")
 	fmt.Printf("%d files would be moved.\n", len(plan.Operations))
+	if len(plan.Conflicts) > 0 {
+		fmt.Printf("\n\x1b[1;38;5;214m%d conflict(s) detected during planning:\x1b[0m\n", len(plan.Conflicts))
+		for _, c := range plan.Conflicts {
+			relTarget, relErr := filepath.Rel(root, c.Target)
+			if relErr != nil {
+				relTarget = c.Target
+			}
+			fmt.Printf("  \x1b[1;38;5;220m%s\x1b[0m\n", relTarget)
+			for _, src := range c.Sources {
+				relSrc, relErr := filepath.Rel(root, src)
+				if relErr != nil {
+					relSrc = src
+				}
+				fmt.Printf("    • %s\n", relSrc)
+			}
+			fmt.Printf("    \x1b[38;5;246m→ %s\x1b[0m\n", c.Resolution)
+		}
+	}
 	if len(plan.FoldersToCreate) > 0 {
 		fmt.Printf("%d folders would be created.\n", len(plan.FoldersToCreate))
 	}
