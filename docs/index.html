@@ -149,7 +149,7 @@
           </div>
           <h3 class="feature-card-title">Completely Reversible</h3>
           <p class="feature-card-desc">
-            Every transaction is logged in an undo database. Run <code>chest undo</code> to rollback the latest run or revert a specific operation by ID at any time.
+            Every transaction is logged in an undo database and recorded honestly — <code>Complete</code>, <code>Partial</code> or <code>Failed</code>, never a lie. Run <code>chest undo</code> to rollback the latest run or revert a specific operation by ID at any time.
           </p>
         </div>
 
@@ -199,7 +199,7 @@
           </div>
           <h3 class="feature-card-title">Conflict & Collision Guard</h3>
           <p class="feature-card-desc">
-            Automatic resolution catches collisions before any disk write. Choose between skip, auto-rename, or interactive approval without risk of accidental data loss.
+            Two files resolving to the same destination can never destroy each other: the second is auto-renamed (<code>photo (1).jpg</code>), case-normalized across platforms, and every conflict is surfaced in the dry-run CONFLICTS block. Or choose <code>--collision skip</code> explicitly.
           </p>
         </div>
 
@@ -233,7 +233,7 @@
             <span class="cmd-tag">chest sort</span>
             <i data-lucide="arrow-right-left" style="color: var(--text-dim);"></i>
           </div>
-          <p class="cmd-desc">Categorizes target folder by preset, extension, or custom logic expressions with dry-run support.</p>
+          <p class="cmd-desc">Categorizes target folder by preset, extension, or custom logic expressions with dry-run support. Rules persist in <code>chest.toml</code> (flags > <code>--rule</code> > project > user > preset), can match embedded metadata (<code>camera=</code>, <code>artist=</code>, <code>codec=</code>), and <code>--dry-run --json</code> exports the plan.</p>
           <div class="cmd-snippet">
             <span>chest sort ~/Downloads -p media</span>
             <i data-lucide="chevron-right"></i>
@@ -269,7 +269,7 @@
             <span class="cmd-tag">chest watch</span>
             <i data-lucide="eye" style="color: var(--text-dim);"></i>
           </div>
-          <p class="cmd-desc">Continuous background listener sorting newly downloaded files as soon as they settle.</p>
+          <p class="cmd-desc">Continuous background listener sorting newly downloaded files as soon as they settle. Plugin classifiers and custom rules apply here too, and each debounce window is recorded as a single undoable history entry.</p>
           <div class="cmd-snippet">
             <span>chest watch ~/Downloads</span>
             <i data-lucide="chevron-right"></i>
@@ -281,7 +281,7 @@
             <span class="cmd-tag">chest undo</span>
             <i data-lucide="rotate-ccw" style="color: var(--text-dim);"></i>
           </div>
-          <p class="cmd-desc">Reverts file transfers by operation ID or rolls back the latest batch run instantly.</p>
+          <p class="cmd-desc">Reverts file transfers by operation ID or rolls back the latest batch run instantly. Runs are recorded honestly — <code>Complete</code>, <code>Partial</code> or <code>Failed</code> — and undo validates the whole batch before restoring anything.</p>
           <div class="cmd-snippet">
             <span>chest undo [id]</span>
             <i data-lucide="chevron-right"></i>
@@ -317,9 +317,33 @@
             <span class="cmd-tag">chest stats</span>
             <i data-lucide="bar-chart-3" style="color: var(--text-dim);"></i>
           </div>
-          <p class="cmd-desc">Generates storage breakdowns, largest-file rankings (absolute paths), and stale-item diagnostics. Scoped runs auto-refresh; bare runs repopulate an empty cache; <code>--refresh</code> forces a re-scan + purge.</p>
+          <p class="cmd-desc">Generates storage breakdowns, largest-file rankings (absolute paths), and stale-item diagnostics. Scoped runs auto-refresh; bare runs repopulate an empty cache; <code>--refresh</code> forces a re-scan + purge. Reports export with <code>--json</code>, <code>--csv</code> or <code>--out</code>.</p>
           <div class="cmd-snippet">
             <span>chest stats ~/Desktop --refresh</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
+            <span class="cmd-tag">chest schedule</span>
+            <i data-lucide="clock" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc">Periodic organizing without a foreground process — registered as a crontab entry on Linux/macOS or a scheduled task on Windows. Manage jobs with <code>list</code>, <code>remove</code> and <code>run-now</code>.</p>
+          <div class="cmd-snippet">
+            <span>chest schedule add --cron "0 2 * * *" -p downloads ~/Downloads</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
+            <span class="cmd-tag">chest rule check</span>
+            <i data-lucide="shield-check" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc">Validates the rule set for a directory — flags, presets and any <code>chest.toml</code> — without scanning or moving files. Catches invalid size values and unsupported field/operator combinations that would otherwise be silently ignored.</p>
+          <div class="cmd-snippet">
+            <span>chest rule check ~/Downloads -p media</span>
             <i data-lucide="chevron-right"></i>
           </div>
         </div>
