@@ -61,7 +61,7 @@ func Execute(plan models.Plan, historyMgr *history.Manager, progress ProgressFun
 
 	// 3. Save history if any files moved
 	if len(executedOps) > 0 && historyMgr != nil {
-		entry, err := historyMgr.Record(plan.RootPath, executedOps)
+		entry, err := historyMgr.Record(plan.RootPath, executedOps, res.Errors...)
 		if err == nil && entry != nil {
 			res.HistoryID = entry.ID
 		}

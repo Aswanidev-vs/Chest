@@ -68,14 +68,25 @@ func (m *Manager) save(store Store) error {
 	return os.WriteFile(m.filePath, data, 0644)
 }
 
-// Record saves a completed operation run
-func (m *Manager) Record(directory string, ops []models.HistoryOperation) (*models.HistoryEntry, error) {
+// Record saves an operation run. The optional errs carry per-file failures:
+// none means every op succeeded (Complete), some failed ops alongside moved
+// ops means Partial, and no moved ops means Failed.
+func (m *Manager) Record(directory string, ops []models.HistoryOperation, errs ...string) (*models.HistoryEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	store, err := m.load()
 	if err != nil {
 		return nil, err
+	}
+
+	status := "Complete"
+	if len(errs) > 0 {
+		if len(ops) > 0 {
+			status = "Partial"
+		} else {
+			status = "Failed"
+		}
 	}
 
 	store.LastID++
@@ -85,7 +96,8 @@ func (m *Manager) Record(directory string, ops []models.HistoryOperation) (*mode
 		Directory:  directory,
 		Operations: ops,
 		FilesCount: len(ops),
-		Status:     "Complete",
+		Status:     status,
+		Errors:     errs,
 	}
 
 	store.Entries = append(store.Entries, entry)
@@ -173,7 +185,15 @@ func (m *Manager) Undo(targetID int, allowSystem ...bool) (*models.HistoryEntry,
 	restoredCount := 0
 	for _, op := range entry.Operations {
 		if err := filesystem.MoveFile(op.Destination, op.OriginalSource); err != nil {
-			return nil, restoredCount, fmt.Errorf("error restoring %s to %s: %w", op.Destination, op.OriginalSource, err)
+			// Roll back the files already restored in this pass so the batch is
+			// left in its recorded state and a later retry starts clean. We
+			// deliberately do not mark the entry Undone (and do not save), so the
+			// run stays Complete and undo can be attempted again.
+			for i := 0; i < restoredCount; i++ {
+				done := entry.Operations[i]
+				_ = filesystem.MoveFile(done.OriginalSource, done.Destination)
+			}
+			return nil, 0, fmt.Errorf("error restoring %s to %s: %w (rolled back %d restored file(s))", op.Destination, op.OriginalSource, err, restoredCount)
 		}
 		restoredCount++
 	}
