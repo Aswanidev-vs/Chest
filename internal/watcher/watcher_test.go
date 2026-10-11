@@ -80,3 +80,30 @@ func TestProcessBatchRecordsSingleHistoryEntry(t *testing.T) {
 		t.Errorf("expected Complete status, got %s", entries[0].Status)
 	}
 }
+
+// TestProcessBatchClassifiesTypeRule verifies watch mode now classifies each
+// incoming file, so a type= rule (which only matches on file.Category) fires.
+// processBatch previously never set file.Category, silently dropping such
+// matches.
+func TestProcessBatchClassifiesTypeRule(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "song.mp3")
+	if err := os.WriteFile(src, []byte("not-a-real-mp3"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := rules.NewEngine([]models.Rule{{Name: "Audio", Type: "Audio", Destination: "Audio"}})
+	hist := history.NewManager(filepath.Join(dir, "history.json"))
+	w := &Watcher{
+		opts:    WatchOptions{Directory: dir, DateSource: "modified"},
+		planner: planner.New(engine, "", models.CollisionRename),
+		history: hist,
+	}
+
+	w.processBatch([]string{src}, func(ev Event) {})
+
+	// .mp3 classifies as Audio, so the type=Audio rule must route it.
+	if _, err := os.Stat(filepath.Join(dir, "Audio", "song.mp3")); err != nil {
+		t.Fatalf("type=Audio rule should route song.mp3 into Audio/: %v", err)
+	}
+}

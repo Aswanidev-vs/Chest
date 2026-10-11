@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aswanidev-vs/chest/internal/classifier"
+	"github.com/Aswanidev-vs/chest/internal/config"
 	"github.com/Aswanidev-vs/chest/internal/history"
 	"github.com/Aswanidev-vs/chest/internal/metadata"
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/Aswanidev-vs/chest/internal/organizer"
 	"github.com/Aswanidev-vs/chest/internal/planner"
-	"github.com/Aswanidev-vs/chest/internal/presets"
 	"github.com/Aswanidev-vs/chest/internal/rules"
 	"github.com/Aswanidev-vs/chest/internal/scanner"
 	"github.com/fsnotify/fsnotify"
@@ -35,6 +36,13 @@ type WatchOptions struct {
 	// The second return value reports whether the file was modified so the
 	// planner can skip re-planning untouched files.
 	EnrichFunc func(file models.File) (models.File, bool)
+	// PluginRules are custom rules contributed by installed classifier
+	// plugins; the shared resolver layers them in last.
+	PluginRules []models.Rule
+	// ClassifyFunc overrides category classification of incoming files (the
+	// composite built-in + plugin classifier). When nil, the built-in
+	// extension classifier is used.
+	ClassifyFunc func(filename, ext string) string
 }
 
 // EventKind identifies the type of activity reported to the watch output.
@@ -62,6 +70,10 @@ type Watcher struct {
 	engine  *rules.Engine
 	planner *planner.Planner
 	history *history.Manager
+	// classify assigns a high-level category to each incoming file so type=
+	// rules can match in watch mode. It is the composite built-in + plugin
+	// classifier returned by the resolver.
+	classify func(filename, ext string) string
 	// managed holds the compartment folder names chest itself creates for rules.
 	managed map[string]struct{}
 	// knownDirs holds external top-level folders seen so far (key: lowercased
@@ -78,30 +90,19 @@ func New(opts WatchOptions) (*Watcher, error) {
 		opts.DateSource = "modified"
 	}
 
-	var activeRules []models.Rule
-
-	if opts.Preset != "" {
-		presetRules, err := presets.LoadPreset(opts.Preset)
-		if err != nil {
-			return nil, err
-		}
-		activeRules = append(activeRules, presetRules...)
-	}
-
-	for i, rStr := range opts.Rules {
-		r, err := rules.ParseRule(rStr, 100-i)
-		if err != nil {
-			return nil, err
-		}
-		activeRules = append(activeRules, r)
-	}
-
-	if len(activeRules) == 0 {
-		defRules, err := presets.LoadPreset("downloads")
-		if err != nil {
-			return nil, err
-		}
-		activeRules = append(activeRules, defRules...)
+	// Assemble rules via the shared resolver: chest.toml discovery for the
+	// watched directory, the optional preset, --rule strings, and plugin rules
+	// layered in last. It also yields the composite classifier used below.
+	activeRules, classifyFunc, rerr := config.Resolve(config.Sources{
+		Target:      opts.Directory,
+		Preset:      opts.Preset,
+		RuleStrings: opts.Rules,
+	}, config.Hooks{
+		PluginRules:  opts.PluginRules,
+		ClassifyFunc: opts.ClassifyFunc,
+	})
+	if rerr != nil {
+		return nil, rerr
 	}
 
 	engine := rules.NewEngine(activeRules)
@@ -137,6 +138,7 @@ func New(opts WatchOptions) (*Watcher, error) {
 		engine:    engine,
 		planner:   p,
 		history:   histMgr,
+		classify:  classifyFunc,
 		managed:   managed,
 		knownDirs: make(map[string]struct{}),
 	}, nil
@@ -298,6 +300,16 @@ func (w *Watcher) processBatch(paths []string, cb func(ev Event)) {
 			ModTime:   info.ModTime(),
 			IsDir:     false,
 		}
+
+		// Classify each incoming file so type= rules can match in watch mode.
+		// Use the composite classifier when set, otherwise the built-in
+		// extension classifier, then fall back to the signature-detected
+		// category when that leaves the file as Other/empty (mirrors scanner).
+		category := classifier.ClassifyExtension(ext)
+		if w.classify != nil {
+			category = w.classify(name, ext)
+		}
+
 		if meta, err := metadata.Extract(filePath, ext); err == nil {
 			if meta.Format != "" {
 				file.Format = meta.Format
@@ -312,7 +324,11 @@ func (w *Watcher) processBatch(paths []string, cb func(ev Event)) {
 				file.TakenDate = &meta.Date.Date
 				file.TakenDateSource = meta.Date.Source
 			}
+			if (category == "" || category == classifier.TypeOther) && meta.Category != "" {
+				category = meta.Category
+			}
 		}
+		file.Category = category
 
 		// External enrichment (e.g. metadata plugins) runs last so it can fill
 		// gaps or override values the built-in extractors produced.
