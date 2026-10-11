@@ -2,9 +2,16 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/csv"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -49,6 +56,77 @@ func refreshIndexBeforeReport(store *indexer.Store, root string, computeHashes b
 		return "", err
 	}
 	return target, nil
+}
+
+// emitReport writes a command's machine-readable report. v is serialized as
+// JSON when asJSON is set; otherwise csvRows is written as CSV. The format is
+// resolved as asJSON || !asCSV so that --out alone (no explicit --json/--csv)
+// defaults to JSON; callers must reject the --json/--csv combination before
+// calling. A non-empty out writes the bytes to that file (truncating) and
+// prints a short confirmation to w; otherwise the bytes go to w.
+func emitReport(w io.Writer, v any, csvRows [][]string, asJSON, asCSV bool, out string) error {
+	data, err := renderReport(v, csvRows, asJSON || !asCSV)
+	if err != nil {
+		return err
+	}
+	if out != "" {
+		if err := os.WriteFile(out, data, 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "wrote %d bytes to %s\n", len(data), out)
+		return nil
+	}
+	_, err = w.Write(data)
+	return err
+}
+
+// renderReport serializes v as two-space-indented JSON with a trailing newline,
+// or the given csvRows as CSV, returning the exact bytes to emit.
+func renderReport(v any, csvRows [][]string, asJSON bool) ([]byte, error) {
+	if asJSON {
+		b, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		return append(b, '\n'), nil
+	}
+	var buf bytes.Buffer
+	if err := csv.NewWriter(&buf).WriteAll(csvRows); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// csvRowsForStats builds the category CSV table: a header, one row per category
+// (sorted so output is reproducible despite random map order), and a TOTAL row.
+func csvRowsForStats(summary indexer.StatsSummary) [][]string {
+	rows := [][]string{{"category", "files", "size_bytes"}}
+	cats := make([]string, 0, len(summary.CategoryCounts))
+	for c := range summary.CategoryCounts {
+		cats = append(cats, c)
+	}
+	sort.Strings(cats)
+	for _, c := range cats {
+		rows = append(rows, []string{
+			c,
+			strconv.Itoa(summary.CategoryCounts[c]),
+			strconv.FormatInt(summary.CategorySizes[c], 10),
+		})
+	}
+	rows = append(rows, []string{"TOTAL", strconv.Itoa(summary.TotalFiles), strconv.FormatInt(summary.TotalSize, 10)})
+	return rows
+}
+
+// csvRowsForDuplicates builds the duplicate CSV table: a header plus one row
+// per file across all duplicate groups.
+func csvRowsForDuplicates(groups []indexer.DuplicateGroup) [][]string {
+	rows := [][]string{{"hash", "size_bytes", "path"}}
+	for _, g := range groups {
+		for _, f := range g.Files {
+			rows = append(rows, []string{g.Hash, strconv.FormatInt(g.Size, 10), f.Path})
+		}
+	}
+	return rows
 }
 
 func newIndexCmd() *cobra.Command {
@@ -220,14 +298,20 @@ func batteryDBPath() string {
 
 func newStatsCmd() *cobra.Command {
 	var (
-		except  []string
-		refresh bool
+		except     []string
+		refresh    bool
+		jsonOutput bool
+		csvOutput  bool
+		outPath    string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "stats [path]",
 		Short: "Display storage and category statistics from local index",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if jsonOutput && csvOutput {
+				return errors.New("choose one of --json or --csv")
+			}
 			store, err := indexer.OpenOrCreate()
 			if err != nil {
 				return err
@@ -251,6 +335,10 @@ func newStatsCmd() *cobra.Command {
 			summary, err := store.GetStats(root)
 			if err != nil {
 				return err
+			}
+
+			if jsonOutput || csvOutput || outPath != "" {
+				return emitReport(cmd.OutOrStdout(), summary, csvRowsForStats(summary), jsonOutput, csvOutput, outPath)
 			}
 
 			fmt.Println("\n\x1b[1;38;5;255mCHEST STATS\x1b[0m")
@@ -285,16 +373,27 @@ func newStatsCmd() *cobra.Command {
 		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
 	cmd.Flags().BoolVar(&refresh, "refresh", false,
 		"Force a fresh re-index (with stale/excluded-row purge) before reporting")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output the index summary as JSON instead of the human report")
+	cmd.Flags().BoolVar(&csvOutput, "csv", false, "Output the category table as CSV instead of the human report")
+	cmd.Flags().StringVar(&outPath, "out", "", "Write the machine-readable report (JSON by default) to FILE instead of stdout")
 	return cmd
 }
 
 func newDuplicatesCmd() *cobra.Command {
-	var except []string
+	var (
+		except     []string
+		jsonOutput bool
+		csvOutput  bool
+		outPath    string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "duplicates [path] [--except dir,glob]",
 		Short: "Find duplicate files using content hashes",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if jsonOutput && csvOutput {
+				return errors.New("choose one of --json or --csv")
+			}
 			store, err := indexer.OpenOrCreate()
 			if err != nil {
 				return err
@@ -319,6 +418,13 @@ func newDuplicatesCmd() *cobra.Command {
 			groups, err := store.FindDuplicates(root)
 			if err != nil {
 				return err
+			}
+
+			if jsonOutput || csvOutput || outPath != "" {
+				if groups == nil {
+					groups = []indexer.DuplicateGroup{}
+				}
+				return emitReport(cmd.OutOrStdout(), groups, csvRowsForDuplicates(groups), jsonOutput, csvOutput, outPath)
 			}
 
 			if len(groups) == 0 {
@@ -350,19 +456,29 @@ func newDuplicatesCmd() *cobra.Command {
 
 	cmd.Flags().StringSliceVar(&except, "except", nil,
 		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output duplicate groups as JSON instead of the human report")
+	cmd.Flags().BoolVar(&csvOutput, "csv", false, "Output duplicates as CSV (hash,size_bytes,path) instead of the human report")
+	cmd.Flags().StringVar(&outPath, "out", "", "Write the machine-readable report (JSON by default) to FILE instead of stdout")
 	return cmd
 }
 
 func newAnalyzeCmd() *cobra.Command {
 	var (
-		except  []string
-		refresh bool
+		except     []string
+		refresh    bool
+		jsonOutput bool
+		csvOutput  bool
+		outPath    string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "analyze [path]",
 		Short: "Analyze indexed filesystem data and report storage intelligence",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if jsonOutput && csvOutput {
+				return errors.New("choose one of --json or --csv")
+			}
+
 			// Time the whole run (including any indexing walk) so report
 			// generation shows how long the command took end-to-end.
 			start := time.Now()
@@ -392,19 +508,27 @@ func newAnalyzeCmd() *cobra.Command {
 				return err
 			}
 
+			machine := jsonOutput || csvOutput || outPath != ""
+
 			// Analyze() is not instant: computing stats, scanning the duplicate
 			// groups (hashing any stale-size candidates) and detecting old/empty
 			// files all happen here. Show what's running so the screen isn't blank
 			// between the progress walk finishing and the report being printed.
-			fmt.Println()
-			if root == "" {
-				fmt.Println("  \x1b[1;38;5;214mComputing storage insights...\x1b[0m")
-			} else {
-				fmt.Printf("  \x1b[1;38;5;214mComputing storage insights for %s...\x1b[0m\n", root)
+			if !machine {
+				fmt.Println()
+				if root == "" {
+					fmt.Println("  \x1b[1;38;5;214mComputing storage insights...\x1b[0m")
+				} else {
+					fmt.Printf("  \x1b[1;38;5;214mComputing storage insights for %s...\x1b[0m\n", root)
+				}
 			}
 			report, err := analyzeWithProgress(store, root)
 			if err != nil {
 				return err
+			}
+
+			if machine {
+				return emitReport(cmd.OutOrStdout(), report, csvRowsForStats(report.Stats), jsonOutput, csvOutput, outPath)
 			}
 
 			fmt.Println("\n\x1b[1;38;5;255mCHEST ANALYSIS REPORT\x1b[0m")
@@ -436,5 +560,8 @@ func newAnalyzeCmd() *cobra.Command {
 		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
 	cmd.Flags().BoolVar(&refresh, "refresh", false,
 		"Force a fresh re-index (with stale/excluded-row purge) before reporting")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output the analysis report as JSON instead of the human report")
+	cmd.Flags().BoolVar(&csvOutput, "csv", false, "Output the category table as CSV instead of the human report")
+	cmd.Flags().StringVar(&outPath, "out", "", "Write the machine-readable report (JSON by default) to FILE instead of stdout")
 	return cmd
 }

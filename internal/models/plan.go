@@ -19,11 +19,20 @@ type Operation struct {
 	IsCollision bool            `json:"is_collision"`
 }
 
+// PlanConflict records a destination that more than one source resolved to
+// within the same plan, together with how the second claim was handled.
+type PlanConflict struct {
+	Target     string   `json:"target"`     // path the conflicting file ended up at
+	Sources    []string `json:"sources"`    // first claimant, then the conflicting file
+	Resolution string   `json:"resolution"` // what happened to the second file
+}
+
 // Plan represents the complete set of proposed filesystem changes.
 type Plan struct {
-	RootPath        string      `json:"root_path"`
-	Operations      []Operation `json:"operations"`
-	FoldersToCreate []string    `json:"folders_to_create"`
-	TotalFiles      int         `json:"total_files"`
-	SkippedFiles    int         `json:"skipped_files"`
+	RootPath        string         `json:"root_path"`
+	Operations      []Operation    `json:"operations"`
+	FoldersToCreate []string       `json:"folders_to_create"`
+	Conflicts       []PlanConflict `json:"conflicts,omitempty"`
+	TotalFiles      int            `json:"total_files"`
+	SkippedFiles    int            `json:"skipped_files"`
 }

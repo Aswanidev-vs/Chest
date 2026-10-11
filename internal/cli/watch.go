@@ -8,7 +8,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Aswanidev-vs/chest/internal/config"
 	"github.com/Aswanidev-vs/chest/internal/filesystem"
+	"github.com/Aswanidev-vs/chest/internal/models"
+	"github.com/Aswanidev-vs/chest/internal/plugin"
 	"github.com/Aswanidev-vs/chest/internal/watcher"
 	"github.com/spf13/cobra"
 )
@@ -44,6 +47,18 @@ Use --initial to also sort files already present before starting to watch.`,
 				return err
 			}
 
+			// Load installed plugins with classifier capability so their custom
+			// rules and classification apply to watch mode, exactly as in sort.
+			var pluginServices []plugin.ClassifierService
+			var pluginRules []models.Rule
+			var pluginCleanup func()
+			if mgr, err := plugin.NewManager(); err == nil {
+				pluginServices, pluginRules, pluginCleanup = mgr.LoadAllClassifiers()
+			}
+			if pluginCleanup != nil {
+				defer pluginCleanup()
+			}
+
 			// Metadata-capable plugins enrich incoming files with
 			// sample-based format/MIME/category/date/field data before
 			// planning. Cleanup runs when watch mode exits.
@@ -51,14 +66,16 @@ Use --initial to also sort files already present before starting to watch.`,
 			defer enricher.cleanup()
 
 			w, err := watcher.New(watcher.WatchOptions{
-				Directory:  dir,
-				Preset:     presetName,
-				Rules:      rulesList,
-				Name:       name,
-				Debounce:   debounce,
-				DryRun:     dryRun,
-				Initial:    initial,
-				EnrichFunc: enricher.enrich,
+				Directory:    dir,
+				Preset:       presetName,
+				Rules:        rulesList,
+				Name:         name,
+				Debounce:     debounce,
+				DryRun:       dryRun,
+				Initial:      initial,
+				EnrichFunc:   enricher.enrich,
+				PluginRules:  pluginRules,
+				ClassifyFunc: config.NewCompositeClassifier(pluginServices),
 			})
 			if err != nil {
 				return err

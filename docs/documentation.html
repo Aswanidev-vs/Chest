@@ -59,9 +59,12 @@
           </div>
           <ul class="docs-nav-list">
             <li><a class="docs-nav-link" href="#cmd-sort">chest sort</a></li>
+            <li><a class="docs-nav-link" href="#cmd-config">chest.toml config</a></li>
+            <li><a class="docs-nav-link" href="#cmd-rule">chest rule check</a></li>
             <li><a class="docs-nav-link" href="#cmd-repl">chest repl</a></li>
             <li><a class="docs-nav-link" href="#cmd-search">chest search</a></li>
             <li><a class="docs-nav-link" href="#cmd-watch">chest watch</a></li>
+            <li><a class="docs-nav-link" href="#cmd-schedule">chest schedule</a></li>
             <li><a class="docs-nav-link" href="#cmd-undo">chest undo & history</a></li>
             <li><a class="docs-nav-link" href="#cmd-index">chest index & clean</a></li>
             <li><a class="docs-nav-link" href="#cmd-intel">stats, dupes & analyze</a></li>
@@ -236,7 +239,7 @@
               <tr>
                 <td><span class="flag-badge">--rule</span></td>
                 <td>string</td>
-                <td>Custom predicate rule: <code>"type=image && size>10MB -> HighRes/"</code>. Rules can match on <code>extension=</code> (filename extension) or <code>format=</code> (content-detected format — routes a file even if its extension is missing or renamed). Custom binary formats can be registered programmatically via the metadata extractor registry.</td>
+                <td>Custom predicate rule: <code>"type=image && size>10MB -> HighRes/"</code>. Rules can match on <code>extension=</code> (filename extension) or <code>format=</code> (content-detected format — routes a file even if its extension is missing or renamed), plus embedded metadata fields: <code>camera=</code>, <code>artist=</code>, <code>album=</code>, <code>genre=</code>, <code>title=</code>, <code>composer=</code>, <code>encoder=</code>, <code>software=</code>, <code>codec=</code>, <code>duration=</code>, <code>width=</code>, <code>height=</code>, or <code>meta.&lt;key&gt;=</code> for any other extracted field. Custom binary formats can be registered programmatically via the metadata extractor registry.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">-y, --yes</span></td>
@@ -256,7 +259,17 @@
               <tr>
                 <td><span class="flag-badge">--date-source</span></td>
                 <td>string</td>
-                <td>Date source for <code>--date</code> and date placeholders: <code>modified</code> (default), <code>auto</code> (embedded media date with modification-time fallback), or <code>taken</code> (embedded date only). Embedded dates are extracted from EXIF <code>DateTimeOriginal</code>/<code>CreateDate</code>, QuickTime <code>mvhd</code>, PDF Info dictionary, ID3/Vorbis/FLAC/OGG tags, RIFF-INFO chunks, and ZIP-based OOXML/ODF/EPUB core properties.</td>
+                <td>Date source for <code>--date</code> and date placeholders: <code>modified</code> (default), <code>auto</code> (embedded media date with modification-time fallback), or <code>taken</code> (embedded date only), or <code>filename</code> (mine the date from the filename: <code>IMG_20230115_...</code>, <code>WhatsApp Image 2024-05-01...</code>, <code>report_20250126.pdf</code>; modification-time fallback). Embedded dates are extracted from EXIF <code>DateTimeOriginal</code>/<code>CreateDate</code>, QuickTime <code>mvhd</code>, PDF Info dictionary, ID3/Vorbis/FLAC/OGG tags, RIFF-INFO chunks, and ZIP-based OOXML/ODF/EPUB core properties.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--collision</span></td>
+                <td>string</td>
+                <td>Destination-collision policy: <code>skip</code>, <code>rename</code>, <code>replace</code>, <code>abort</code>. Default (flag omitted): when two files in the same plan resolve to one destination, the second is auto-renamed (<code>photo (1).jpg</code>), case-normalized per platform, and every conflict is listed in the dry-run CONFLICTS block. An explicit <code>skip</code> leaves the second file in place instead.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--json</span></td>
+                <td>boolean</td>
+                <td>With <code>--dry-run</code>, print the plan as JSON (operations, folders to create, conflicts) instead of the human report.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--date-granularity</span></td>
@@ -280,6 +293,44 @@
               </tr>
             </tbody>
           </table>
+
+          <h3 id="cmd-config">chest.toml configuration</h3>
+          <p>Rules persist in a <code>chest.toml</code> file. CHEST walks up from the target directory to find a project config, and also reads <code>~/.chest/chest.toml</code> for user-wide defaults. Rule sources stack with precedence <strong>flags &gt; <code>--rule</code> &gt; project <code>chest.toml</code> &gt; user <code>chest.toml</code> &gt; preset</strong>.</p>
+          <div class="code-block-wrapper">
+            <div class="code-block">
+              <pre><code># chest.toml
+default_preset = "downloads"
+
+[[rules]]
+name = "Large videos"
+priority = 100
+destination = "Videos/HiFi"
+conditions = [
+  { field = "type", operator = "=", value = "Video" },
+  { field = "size", operator = ">", value = "2GB" },
+]
+
+[[rules]]
+name = "Camera photos"
+priority = 90
+destination = "Photos/Camera"
+conditions = [{ field = "camera", operator = "=", value = "Canon" }]</code></pre>
+            </div>
+          </div>
+          <p>Convenience helpers (<code>extensions</code>, <code>type</code>, <code>min_size</code>, <code>max_size</code>) work exactly as in built-in presets, so the same shape is accepted everywhere.</p>
+
+          <h3 id="cmd-rule">chest rule check</h3>
+          <p>Validates the rule set that would apply to a directory &mdash; flags, presets, and any discovered <code>chest.toml</code> &mdash; <strong>without scanning or moving files</strong>. It surfaces the problems that would otherwise be silently ignored at evaluation time: unparseable <code>min_size</code>/<code>max_size</code> values (which used to make a rule match everything), unsupported field/operator combinations, and invalid regexes.</p>
+          <div class="code-block-wrapper">
+            <div class="code-block">
+              <pre><code>$ chest rule check ~/Downloads -p media
+&#10003; 12 rule(s) validated, no problems found.
+
+$ chest rule check . --rule "name =~ '[unclosed' -> Images"
+1 problem(s) found in 1 rule(s):
+  &bull; rule 'name =~ '[unclosed' -> Images': invalid regex "[unclosed" for field "name"</code></pre>
+            </div>
+          </div>
 
           <h3 id="cmd-repl">chest repl</h3>
           <p>Build a sort rule set interactively, with a preview that re-plans after every edit. The target directory is scanned once; from then on <code>add</code>, <code>edit</code> and <code>rm</code> refine the in-memory rules while <code>preview</code> recomputes the plan from the current set and renders the same dry-run report as <code>sort --dry-run</code>. <code>preview</code> is strictly read-only — it creates no folders and moves nothing. Only <code>apply</code> executes, and it records history so the run can be reverted with <code>chest undo</code>.</p>
@@ -675,7 +726,7 @@ Continue? [y/N]: y
           </table>
 
           <h3 id="cmd-watch">chest watch</h3>
-          <p>Background daemon monitoring real-time filesystem changes using <code>fsnotify</code>. New files are sorted as they arrive, folder creations and removals are reported instantly, and <code>--initial</code> sorts files that are already present before watching begins.</p>
+          <p>Background daemon monitoring real-time filesystem changes using <code>fsnotify</code>. New files are sorted as they arrive, folder creations and removals are reported instantly, and <code>--initial</code> sorts files that are already present before watching begins. Installed plugin classifiers and their <code>GetCustomRules()</code> apply here exactly as in <code>sort</code>, and each debounce window is recorded as a <em>single</em> history entry (one undo reverts the whole batch).</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">watch</span> <span class="t-path">~/Downloads</span> <span class="t-flag">--preset</span> media <span class="t-flag">--debounce</span> 500ms
@@ -714,8 +765,44 @@ Continue? [y/N]: y
             </tbody>
           </table>
 
+          <h3 id="cmd-schedule">chest schedule</h3>
+          <p>Periodic organizing without a foreground process. Schedules live in <code>~/.chest/schedules.toml</code> and are registered with the OS scheduler: a managed crontab block on Linux/macOS, a scheduled task on Windows (daily cron expressions; more complex expressions can be printed with <code>--print-cron</code> and wired up manually).</p>
+          <div class="code-block-wrapper">
+            <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">schedule add</span> <span class="t-flag">--cron</span> <span class="t-str">"0 2 * * *"</span> <span class="t-flag">--preset</span> downloads <span class="t-path">~/Downloads</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">schedule list</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">schedule run-now</span> <span class="t-num">s1</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">schedule remove</span> <span class="t-num">s1</span></code></pre>
+          </div>
+          <table class="flag-table">
+            <thead>
+              <tr>
+                <th>Flag</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="flag-badge">--cron</span></td>
+                <td>string</td>
+                <td>5-field cron expression (minute hour dom month dow), e.g. <code>"0 2 * * *"</code>.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--preset / --rule</span></td>
+                <td>string</td>
+                <td>What the scheduled run applies; falls back to the target's <code>chest.toml</code> / default preset.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--print-cron</span></td>
+                <td>boolean</td>
+                <td>Print the crontab line instead of installing anything (also works for expressions schtasks cannot express).</td>
+              </tr>
+            </tbody>
+          </table>
+
           <h3 id="cmd-undo">chest undo & history</h3>
-          <p>Inspect previous operations or rollback a batch of moves:</p>
+          <p>Inspect previous operations or rollback a batch of moves. Every run is recorded honestly: <code>Complete</code> when every file moved, <code>Partial</code> when some failed (the failures are listed in the entry), <code>Failed</code> when nothing moved. Undo validates the entire batch before restoring anything and rolls back cleanly if interrupted.</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">history</span>        <span class="t-comment"># Display recorded operation history</span>
@@ -752,13 +839,15 @@ Continue? [y/N]: y
           </div>
 
           <h3 id="cmd-intel">stats, duplicates & analyze</h3>
-          <p>Storage intelligence commands. A scoped run always refreshes its folder first; a bare run re-populates an empty cache from the current directory instead of reporting all zeros. <code>--except</code> prunes noisy directories (and drops their previously-indexed rows), and <code>--refresh</code> forces a fresh re-scan with stale-row purge. Largest files are reported with absolute paths:</p>
+          <p>Storage intelligence commands. A scoped run always refreshes its folder first; a bare run re-populates an empty cache from the current directory instead of reporting all zeros. <code>--except</code> prunes noisy directories (and drops their previously-indexed rows), and <code>--refresh</code> forces a fresh re-scan with stale-row purge. Largest files are reported with absolute paths. All three commands (and <code>history</code>) export machine-readable output with <code>--json</code>, <code>--csv</code>, or <code>--out &lt;file&gt;</code>:</p>
           <div class="code-block-wrapper">
             <button class="code-copy-btn" data-copy-btn title="Copy to clipboard"><i data-lucide="copy"></i><span>Copy</span></button>
             <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-path">~/Projects</span> <span class="t-flag">--except</span> node_modules <span class="t-comment"># Auto-refresh scope + category/size breakdown</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-flag">--refresh</span>          <span class="t-comment"># Force a fresh re-scan + purge of the current dir</span>
 <span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-path">~/Downloads</span>  <span class="t-comment"># Locate byte-for-byte duplicates</span>
-<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">analyze</span> <span class="t-path">~/Documents</span> <span class="t-flag">--refresh</span> <span class="t-comment"># Force fresh audit (zero-byte + stale &gt;180d)</span></code></pre>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">analyze</span> <span class="t-path">~/Documents</span> <span class="t-flag">--refresh</span> <span class="t-comment"># Force fresh audit (zero-byte + stale &gt;180d)</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">stats</span> <span class="t-flag">--json</span> <span class="t-flag">--out</span> stats.json <span class="t-comment"># Machine-readable export to file</span>
+<span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">duplicates</span> <span class="t-flag">--csv</span>  <span class="t-comment"># CSV rows for scripts</span></code></pre>
           </div>
 
           <h3 id="cmd-speedtest">chest speedtest</h3>

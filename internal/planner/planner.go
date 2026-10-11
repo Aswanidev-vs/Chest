@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Aswanidev-vs/chest/internal/dates"
 	"github.com/Aswanidev-vs/chest/internal/filesystem"
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/Aswanidev-vs/chest/internal/rules"
@@ -18,6 +19,11 @@ type Planner struct {
 	engine          *rules.Engine
 	baseDestination string
 	collisionPolicy models.CollisionPolicy
+	// explicitPolicy records whether the caller passed a concrete collision
+	// policy. New maps "" to CollisionSkip internally, so the two are
+	// indistinguishable from collisionPolicy alone; the default (auto-rename
+	// on intra-plan conflicts) must only apply to the implicit case.
+	explicitPolicy  bool
 	dateSource      string
 	dateGranularity string
 	dateMonthFormat string
@@ -42,6 +48,7 @@ func WithDate(source, granularity, monthFormat string) Option {
 
 // New creates a new Planner
 func New(engine *rules.Engine, baseDestination string, collisionPolicy models.CollisionPolicy, opts ...Option) *Planner {
+	explicitPolicy := collisionPolicy != ""
 	if collisionPolicy == "" {
 		collisionPolicy = models.CollisionSkip
 	}
@@ -49,6 +56,7 @@ func New(engine *rules.Engine, baseDestination string, collisionPolicy models.Co
 		engine:          engine,
 		baseDestination: baseDestination,
 		collisionPolicy: collisionPolicy,
+		explicitPolicy:  explicitPolicy,
 		dateSource:      "modified",
 		dateGranularity: "year",
 		dateMonthFormat: "name",
@@ -103,6 +111,13 @@ func (p *Planner) dateFor(file models.File) (time.Time, bool) {
 			return time.Time{}, false
 		}
 		return *file.TakenDate, true
+	case "filename":
+		// A date mined from the filename wins over mtime; the fallback keeps
+		// files without a recognizable name date on the old behavior.
+		if date, ok := dates.FromFilename(file.Name); ok {
+			return date, true
+		}
+		return file.ModTime, true
 	default:
 		return file.ModTime, true
 	}
@@ -142,6 +157,41 @@ func expandDatePlaceholders(destination string, date time.Time, granularity, mon
 	return destDir
 }
 
+// resolveUniqueTarget returns the first variant of targetFile that is free on
+// disk and unclaimed by earlier operations in this plan
+// (photo.jpg -> photo (1).jpg -> photo (2).jpg ...), plus the source whose
+// in-plan claim forced the rename ("" when no claim was hit).
+// filesystem.ResolveCollision is disk-aware only, so it would return the same
+// free name for two files that both target photo.jpg and the collision would
+// reappear at execute time.
+func resolveUniqueTarget(targetFile string, claimed map[string]string) (string, string) {
+	var blockedBy string
+	if !filesystem.Exists(targetFile) {
+		prev, taken := claimed[filesystem.CaseKey(targetFile)]
+		if !taken {
+			return targetFile, ""
+		}
+		blockedBy = prev
+	}
+
+	dir := filepath.Dir(targetFile)
+	base := filepath.Base(targetFile)
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+
+	for counter := 1; ; counter++ {
+		candidate := filepath.Join(dir, fmt.Sprintf("%s (%d)%s", stem, counter, ext))
+		if filesystem.Exists(candidate) {
+			continue
+		}
+		if prev, taken := claimed[filesystem.CaseKey(candidate)]; taken {
+			blockedBy = prev
+			continue
+		}
+		return candidate, blockedBy
+	}
+}
+
 // Plan creates the proposed set of operations
 func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 	plan := models.Plan{
@@ -149,6 +199,11 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 	}
 
 	foldersMap := make(map[string]bool)
+	// claimed maps destinations already taken by earlier operations in this
+	// plan (case-folded key) to the source that claimed them. Without it two
+	// files resolving to the same destination are both planned and the second
+	// move silently overwrites the first at execute time.
+	claimed := make(map[string]string)
 
 	for _, file := range files {
 		plan.TotalFiles++
@@ -192,25 +247,66 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 			continue
 		}
 
-		// Check for collision
-		isCollision := filesystem.Exists(targetFile)
+		// Check for collision, both against the disk and against destinations
+		// already claimed by earlier operations in this plan. Keys are
+		// case-folded so Photo.jpg / photo.jpg cannot slip through as two
+		// distinct targets on case-insensitive filesystems.
+		onDisk := filesystem.Exists(targetFile)
+		firstClaimer, claimedInPlan := claimed[filesystem.CaseKey(targetFile)]
+		isCollision := onDisk || claimedInPlan
 		actualTarget := targetFile
 		action := p.collisionPolicy
 
 		if isCollision {
 			switch p.collisionPolicy {
 			case models.CollisionSkip:
-				plan.SkippedFiles++
-				continue
+				// A file already on disk keeps today's behavior: skip.
+				if !claimedInPlan {
+					plan.SkippedFiles++
+					continue
+				}
+				// Intra-plan-only conflict: an explicit skip policy leaves the
+				// second file in place; the implicit default auto-renames it.
+				if p.explicitPolicy {
+					plan.Conflicts = append(plan.Conflicts, models.PlanConflict{
+						Target:     file.Path,
+						Sources:    []string{firstClaimer, file.Path},
+						Resolution: "second file left in place under skip policy",
+					})
+					plan.SkippedFiles++
+					continue
+				}
+				actualTarget, _ = resolveUniqueTarget(targetFile, claimed)
+				action = models.CollisionRename
+				plan.Conflicts = append(plan.Conflicts, models.PlanConflict{
+					Target:     actualTarget,
+					Sources:    []string{firstClaimer, file.Path},
+					Resolution: "auto-renamed second file to " + filepath.Base(actualTarget),
+				})
 			case models.CollisionRename:
-				actualTarget = filesystem.ResolveCollision(targetFile)
+				var blockedBy string
+				actualTarget, blockedBy = resolveUniqueTarget(targetFile, claimed)
+				if blockedBy != "" {
+					plan.Conflicts = append(plan.Conflicts, models.PlanConflict{
+						Target:     actualTarget,
+						Sources:    []string{blockedBy, file.Path},
+						Resolution: "auto-renamed second file to " + filepath.Base(actualTarget),
+					})
+				}
 			case models.CollisionReplace:
-				// will overwrite
+				if claimedInPlan {
+					plan.Conflicts = append(plan.Conflicts, models.PlanConflict{
+						Target:     actualTarget,
+						Sources:    []string{firstClaimer, file.Path},
+						Resolution: "overwrite under replace policy",
+					})
+				}
 			case models.CollisionAbort:
 				return plan, fmt.Errorf("file collision detected: '%s' already exists in '%s'", file.Name, targetDir)
 			}
 		}
 
+		claimed[filesystem.CaseKey(actualTarget)] = file.Path
 		foldersMap[targetDir] = true
 
 		plan.Operations = append(plan.Operations, models.Operation{

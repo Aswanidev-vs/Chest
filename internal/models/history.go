@@ -16,5 +16,9 @@ type HistoryEntry struct {
 	Directory  string             `json:"directory"`
 	Operations []HistoryOperation `json:"operations"`
 	FilesCount int                `json:"files_count"`
-	Status     string             `json:"status"` // "Complete", "Undone"
+	// Status is one of: Complete (all ops ok), Partial (some ops failed but
+	// some moved), Failed (nothing moved), Undone (rolled back).
+	Status string `json:"status"`
+	// Errors holds the per-file failures that made Status Partial or Failed.
+	Errors []string `json:"errors,omitempty"`
 }

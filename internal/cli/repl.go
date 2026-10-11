@@ -102,11 +102,12 @@ func (f replFlags) session(targetDir string) (*replSession, error) {
 		return nil, fmt.Errorf("access denied: '%s' is located in protected %s.\nCHEST refuses to build rules against OS or system directories.", absTarget, reason)
 	}
 
+	// An empty value (flag left at its default) defers to the planner's
+	// implicit auto-rename default, so an intra-plan conflict never silently
+	// destroys a file; an explicit value is validated and forwarded verbatim.
 	collisionPolicy := models.CollisionPolicy(strings.ToLower(f.collision))
-	if collisionPolicy == "" {
-		collisionPolicy = models.CollisionSkip
-	}
 	switch collisionPolicy {
+	case "":
 	case models.CollisionSkip, models.CollisionRename, models.CollisionReplace, models.CollisionAbort:
 	default:
 		return nil, fmt.Errorf("invalid collision policy '%s'. Valid: skip, rename, replace, abort", f.collision)
@@ -379,6 +380,12 @@ func (s *replSession) apply() {
 	fmt.Fprintf(s.out, "[DONE] %d file(s) organized into %d folder(s).\n", result.FilesMoved, result.FoldersCreated)
 	if result.HistoryID > 0 {
 		fmt.Fprintf(s.out, "History recorded as operation #%d (use 'chest undo' to revert).\n", result.HistoryID)
+	}
+	for _, e := range result.Errors {
+		fmt.Fprintf(s.out, "%s✖ %s%s\n", "\x1b[38;5;196m", e, "\x1b[0m")
+	}
+	if len(result.Errors) > 0 {
+		fmt.Fprintf(s.out, "%s%d file(s) could not be organized; the run is recorded as partial in history.%s\n", "\x1b[38;5;214m", len(result.Errors), "\x1b[0m")
 	}
 
 	// The sources are gone after a move, so the cached scan is stale from here on.

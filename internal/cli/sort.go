@@ -2,20 +2,20 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	gosort "sort"
 	"strings"
 
-	"github.com/Aswanidev-vs/chest/internal/classifier"
+	"github.com/Aswanidev-vs/chest/internal/config"
 	"github.com/Aswanidev-vs/chest/internal/filesystem"
 	"github.com/Aswanidev-vs/chest/internal/history"
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/Aswanidev-vs/chest/internal/organizer"
 	"github.com/Aswanidev-vs/chest/internal/planner"
 	"github.com/Aswanidev-vs/chest/internal/plugin"
-	"github.com/Aswanidev-vs/chest/internal/presets"
 	"github.com/Aswanidev-vs/chest/internal/rules"
 	"github.com/Aswanidev-vs/chest/internal/scanner"
 	"github.com/spf13/cobra"
@@ -33,6 +33,7 @@ type sortFlags struct {
 	name            string
 	preset          string
 	dryRun          bool
+	jsonPlan        bool
 	yes             bool
 	recursive       bool
 	verbose         bool
@@ -94,15 +95,16 @@ func newSortCmd() *cobra.Command {
 				}
 			}
 
-			// Validate collision policy
+			// Collision policy: an empty value (flag left at its default) defers
+			// to the planner's implicit auto-rename default; a value the user
+			// passed explicitly is validated here and forwarded verbatim.
 			collisionPolicy := models.CollisionPolicy(strings.ToLower(f.collision))
-			if collisionPolicy == "" {
-				collisionPolicy = models.CollisionSkip
-			}
-			switch collisionPolicy {
-			case models.CollisionSkip, models.CollisionRename, models.CollisionReplace, models.CollisionAbort:
-			default:
-				return fmt.Errorf("invalid collision policy '%s'. Valid: skip, rename, replace, abort", f.collision)
+			if collisionPolicy != "" {
+				switch collisionPolicy {
+				case models.CollisionSkip, models.CollisionRename, models.CollisionReplace, models.CollisionAbort:
+				default:
+					return fmt.Errorf("invalid collision policy '%s'. Valid: skip, rename, replace, abort", f.collision)
+				}
 			}
 
 			dateSource := strings.ToLower(f.dateSource)
@@ -110,9 +112,9 @@ func newSortCmd() *cobra.Command {
 				dateSource = "modified"
 			}
 			switch dateSource {
-			case "modified", "auto", "taken":
+			case "modified", "auto", "taken", "filename":
 			default:
-				return fmt.Errorf("invalid date source '%s'. Valid: modified, auto, taken", f.dateSource)
+				return fmt.Errorf("invalid date source '%s'. Valid: modified, auto, taken, filename", f.dateSource)
 			}
 
 			dateGranularity := strings.ToLower(f.dateGranularity)
@@ -135,153 +137,51 @@ func newSortCmd() *cobra.Command {
 				return fmt.Errorf("invalid month format '%s'. Valid: name, number", f.monthFormat)
 			}
 
-			// Assemble rules
-			var ruleList []models.Rule
-
-			// 1. If preset specified, load it
-			if f.preset != "" {
-				pRules, err := presets.LoadPreset(f.preset)
-				if err != nil {
-					return err
-				}
-				ruleList = append(ruleList, pRules...)
-			}
-
-			// 2. Custom rule strings
-			for i, rStr := range f.customRules {
-				r, err := rules.ParseRule(rStr, 100-i)
-				if err != nil {
-					return fmt.Errorf("error parsing --rule: %w", err)
-				}
-				ruleList = append(ruleList, r)
-			}
-
-			// 3. Flags-based automatic rule generation
-			if f.byType {
-				// Categorize by file types
-				categories := []string{
-					classifier.TypeImage, classifier.TypeVideo, classifier.TypeAudio,
-					classifier.TypeDocument, classifier.TypeArchive, classifier.TypeExecutable,
-					classifier.TypeCode, classifier.TypeOther,
-				}
-				for _, cat := range categories {
-					ruleList = append(ruleList, models.Rule{
-						Name:        "Type: " + cat,
-						Priority:    20,
-						Destination: cat + "s",
-						Conditions: []models.Condition{
-							{Field: models.FieldType, Operator: models.OpEqual, Value: cat},
-						},
-					})
-				}
-			}
-
-			if f.byFormat {
-				// Extension rule fallback: files go into folder named after uppercase extension
-				ruleList = append(ruleList, models.Rule{
-					Name:        "Format/Extension",
-					Priority:    10,
-					Destination: "{ext}", // handled or common types
-				})
-			}
-
-			if f.bySize {
-				ruleList = append(ruleList,
-					models.Rule{
-						Name:        "Huge Files (>1GB)",
-						Priority:    25,
-						Destination: "Huge Files",
-						MinSize:     "1GB",
-					},
-					models.Rule{
-						Name:        "Large Files (100MB-1GB)",
-						Priority:    24,
-						Destination: "Large Files",
-						MinSize:     "100MB",
-						MaxSize:     "1GB",
-					},
-					models.Rule{
-						Name:        "Medium Files (10MB-100MB)",
-						Priority:    23,
-						Destination: "Medium Files",
-						MinSize:     "10MB",
-						MaxSize:     "100MB",
-					},
-					models.Rule{
-						Name:        "Small Files (1MB-10MB)",
-						Priority:    22,
-						Destination: "Small Files",
-						MinSize:     "1MB",
-						MaxSize:     "10MB",
-					},
-					models.Rule{
-						Name:        "Tiny Files (<1MB)",
-						Priority:    21,
-						Destination: "Tiny Files",
-						MaxSize:     "1MB",
-					},
-				)
-			}
-
-			if f.byDate {
-				ruleList = append(ruleList, models.Rule{
-					Name:        "Date",
-					Priority:    20,
-					Destination: "{date}",
-				})
-			}
-
-			// If no rule specified, default to downloads preset
-			if len(ruleList) == 0 {
-				defaultRules, err := presets.LoadPreset("downloads")
-				if err == nil {
-					ruleList = defaultRules
-				}
-			}
-
-			// Load installed plugins with classifier capability
+			// Load installed plugins with classifier capability. Their custom
+			// rules are layered in last by the resolver and their classifiers
+			// form the plugin fallback of the composite classifier.
 			var pluginServices []plugin.ClassifierService
+			var pluginRules []models.Rule
 			var pluginCleanup func()
-			var enrichFunc func(models.File) (models.File, bool)
 			if mgr, err := plugin.NewManager(); err == nil {
-				var pluginRules []models.Rule
 				pluginServices, pluginRules, pluginCleanup = mgr.LoadAllClassifiers()
-				if len(pluginRules) > 0 {
-					ruleList = append(ruleList, pluginRules...)
-					if f.verbose {
-						fmt.Printf("[PLUGIN] Injected %d custom rules from %d plugins\n", len(pluginRules), len(pluginServices))
-					}
-				}
-
-				// Metadata-capable plugins enrich scanned files with
-				// sample-based format/MIME/category/date/field data.
-				enricher := loadMetadataEnricher()
-				defer enricher.cleanup()
-				enrichFunc = enricher.enrich
-				if f.verbose && enricher.services > 0 {
-					defer func() {
-						if n := enricher.enriched(); n > 0 {
-							fmt.Printf("[PLUGIN] Enriched %d file(s) via %d metadata plugin(s)\n", n, enricher.services)
-						}
-					}()
+				if len(pluginRules) > 0 && f.verbose {
+					fmt.Printf("[PLUGIN] Injected %d custom rules from %d plugins\n", len(pluginRules), len(pluginServices))
 				}
 			}
 			if pluginCleanup != nil {
 				defer pluginCleanup()
 			}
 
-			// Build composite classifier: built-in first, plugin fallback
-			classifyFunc := func(filename, ext string) string {
-				cat := classifier.ClassifyExtension(ext)
-				if cat != classifier.TypeOther && cat != "" {
-					return cat
-				}
-				if len(pluginServices) > 0 {
-					if pluginCat := plugin.ClassifyWithPlugins(pluginServices, filename, ext); pluginCat != "" {
-						return pluginCat
+			// Metadata-capable plugins enrich scanned files with sample-based
+			// format/MIME/category/date/field data.
+			enricher := loadMetadataEnricher()
+			defer enricher.cleanup()
+			enrichFunc := enricher.enrich
+			if f.verbose && enricher.services > 0 {
+				defer func() {
+					if n := enricher.enriched(); n > 0 {
+						fmt.Printf("[PLUGIN] Enriched %d file(s) via %d metadata plugin(s)\n", n, enricher.services)
 					}
-				}
-				return cat
+				}()
+			}
+
+			// Assemble the rule chain (chest.toml configs, preset, --rule
+			// strings, flag rules, then plugin rules) via the shared resolver.
+			ruleList, classifyFunc, err := config.Resolve(config.Sources{
+				Target:      absTarget,
+				Preset:      f.preset,
+				RuleStrings: f.customRules,
+				ByType:      f.byType,
+				ByFormat:    f.byFormat,
+				BySize:      f.bySize,
+				ByDate:      f.byDate,
+			}, config.Hooks{
+				PluginServices: pluginServices,
+				PluginRules:    pluginRules,
+			})
+			if err != nil {
+				return err
 			}
 
 			// Initialize scanner
@@ -381,6 +281,14 @@ func newSortCmd() *cobra.Command {
 
 			// Handle Dry Run
 			if f.dryRun {
+				if f.jsonPlan {
+					data, err := json.MarshalIndent(plan, "", "  ")
+					if err != nil {
+						return fmt.Errorf("error serializing plan: %w", err)
+					}
+					fmt.Println(string(data))
+					return nil
+				}
 				printDryRun(plan, absTarget)
 				return nil
 			}
@@ -448,6 +356,12 @@ func newSortCmd() *cobra.Command {
 				if result.HistoryID > 0 {
 					fmt.Printf("History recorded as operation #%d (use 'chest undo' to revert).\n", result.HistoryID)
 				}
+				for _, e := range result.Errors {
+					fmt.Printf("\x1b[38;5;196m✖ %s\x1b[0m\n", e)
+				}
+				if len(result.Errors) > 0 {
+					fmt.Printf("\x1b[38;5;214m%d file(s) could not be organized; the run is recorded as partial in history.\x1b[0m\n", len(result.Errors))
+				}
 			}
 
 			return nil
@@ -458,13 +372,14 @@ func newSortCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&f.byFormat, "format", "f", false, "Boolean; group files into folders by their real extension (MP4/, MP3/, PNG/). Take no value")
 	cmd.Flags().BoolVarP(&f.bySize, "size", "s", false, "Sort by file size")
 	cmd.Flags().BoolVarP(&f.byDate, "date", "d", false, "Sort by date")
-	cmd.Flags().StringVar(&f.dateSource, "date-source", "modified", "Date source for --date and date placeholders: modified, auto, taken")
+	cmd.Flags().StringVar(&f.dateSource, "date-source", "modified", "Date source for --date and date placeholders: modified, auto, taken, filename")
 	cmd.Flags().StringVar(&f.dateGranularity, "date-granularity", "year", "Date folder granularity for --date and date placeholders: year, month, day")
 	cmd.Flags().StringVar(&f.monthFormat, "month-format", "name", "Month folder format for --date and {month} placeholder: name (Jan, Feb), number (01, 02)")
 	cmd.Flags().StringVarP(&f.into, "into", "i", "", "Custom destination folder")
 	cmd.Flags().StringVar(&f.name, "name", "", "Move all matched files flat into this folder inside the target directory (e.g. --name \"Anime\" -> Anime/*.mp4); cannot be combined with --into")
 	cmd.Flags().StringVarP(&f.preset, "preset", "p", "", "Use predefined preset (downloads, media, documents, developer, photos)")
 	cmd.Flags().BoolVarP(&f.dryRun, "dry-run", "n", false, "Preview changes without modifying filesystem")
+	cmd.Flags().BoolVar(&f.jsonPlan, "json", false, "With --dry-run, print the plan as JSON (operations, folders, conflicts)")
 	cmd.Flags().BoolVarP(&f.yes, "yes", "y", false, "Skip confirmation prompt")
 	cmd.Flags().BoolVarP(&f.recursive, "recursive", "r", false, "Include subdirectories")
 	cmd.Flags().BoolVarP(&f.verbose, "verbose", "v", false, "Detailed output")
@@ -473,7 +388,7 @@ func newSortCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&f.hidden, "hidden", false, "Include hidden files")
 	cmd.Flags().StringArrayVar(&f.customRules, "rule", nil, "Custom rule e.g. 'type=video && size>1GB -> Videos/Large'")
 	cmd.Flags().BoolVar(&f.followSymlinks, "follow-symlinks", false, "Follow symbolic links")
-	cmd.Flags().StringVar(&f.collision, "collision", "skip", "Collision policy: skip, rename, replace, abort")
+	cmd.Flags().StringVar(&f.collision, "collision", "", "Collision policy: skip, rename, replace, abort (default: auto-rename on conflicts)")
 	cmd.Flags().BoolVar(&f.allowSystem, "allow-system", false, "Allow modifications in protected OS or system directories")
 
 	return cmd
@@ -498,6 +413,24 @@ func printDryRun(plan models.Plan, root string) {
 
 	fmt.Println("────────────────────────")
 	fmt.Printf("%d files would be moved.\n", len(plan.Operations))
+	if len(plan.Conflicts) > 0 {
+		fmt.Printf("\n\x1b[1;38;5;214m%d conflict(s) detected during planning:\x1b[0m\n", len(plan.Conflicts))
+		for _, c := range plan.Conflicts {
+			relTarget, relErr := filepath.Rel(root, c.Target)
+			if relErr != nil {
+				relTarget = c.Target
+			}
+			fmt.Printf("  \x1b[1;38;5;220m%s\x1b[0m\n", relTarget)
+			for _, src := range c.Sources {
+				relSrc, relErr := filepath.Rel(root, src)
+				if relErr != nil {
+					relSrc = src
+				}
+				fmt.Printf("    • %s\n", relSrc)
+			}
+			fmt.Printf("    \x1b[38;5;246m→ %s\x1b[0m\n", c.Resolution)
+		}
+	}
 	if len(plan.FoldersToCreate) > 0 {
 		fmt.Printf("%d folders would be created.\n", len(plan.FoldersToCreate))
 	}
