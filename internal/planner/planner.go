@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Aswanidev-vs/chest/internal/dates"
 	"github.com/Aswanidev-vs/chest/internal/filesystem"
 	"github.com/Aswanidev-vs/chest/internal/models"
 	"github.com/Aswanidev-vs/chest/internal/rules"
@@ -110,6 +111,13 @@ func (p *Planner) dateFor(file models.File) (time.Time, bool) {
 			return time.Time{}, false
 		}
 		return *file.TakenDate, true
+	case "filename":
+		// A date mined from the filename wins over mtime; the fallback keeps
+		// files without a recognizable name date on the old behavior.
+		if date, ok := dates.FromFilename(file.Name); ok {
+			return date, true
+		}
+		return file.ModTime, true
 	default:
 		return file.ModTime, true
 	}

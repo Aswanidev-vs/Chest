@@ -395,3 +395,43 @@ func TestPlanOnDiskCollisionUnderDefaultPolicySkips(t *testing.T) {
 		t.Errorf("on-disk-only collisions should not be recorded as plan conflicts, got %d", len(plan.Conflicts))
 	}
 }
+
+func TestPlanDateSourceFilenameRoutesDestination(t *testing.T) {
+	root := t.TempDir()
+	file := models.File{
+		Name:    "report_20230115.pdf",
+		Path:    filepath.Join(root, "report_20230115.pdf"),
+		ModTime: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+	}
+	engine := rules.NewEngine([]models.Rule{{Name: "Reports", Priority: 20, Destination: "{year}/{month}"}})
+
+	plan, err := New(engine, "", "", WithDate("filename", "month", "name")).Plan(root, []models.File{file})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+
+	want := filepath.Join(root, "2023", "Jan", "report_20230115.pdf")
+	if len(plan.Operations) != 1 || plan.Operations[0].Destination != want {
+		t.Fatalf("destination = %v, want %q", plan.Operations, want)
+	}
+}
+
+func TestPlanDateSourceFilenameFallsBackToModTime(t *testing.T) {
+	root := t.TempDir()
+	file := models.File{
+		Name:    "notes.pdf",
+		Path:    filepath.Join(root, "notes.pdf"),
+		ModTime: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+	}
+	engine := rules.NewEngine([]models.Rule{{Name: "Reports", Priority: 20, Destination: "{year}/{month}"}})
+
+	plan, err := New(engine, "", "", WithDate("filename", "month", "name")).Plan(root, []models.File{file})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+
+	want := filepath.Join(root, "2026", "Jan", "notes.pdf")
+	if len(plan.Operations) != 1 || plan.Operations[0].Destination != want {
+		t.Fatalf("destination = %v, want %q", plan.Operations, want)
+	}
+}
