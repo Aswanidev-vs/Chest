@@ -86,6 +86,7 @@ func init() {
 	rootCmd.AddCommand(newPresetCmd())
 	rootCmd.AddCommand(newPluginCmd())
 	rootCmd.AddCommand(newWatchCmd())
+	rootCmd.AddCommand(newScheduleCmd())
 	rootCmd.AddCommand(newIndexCmd())
 	rootCmd.AddCommand(newStatsCmd())
 	rootCmd.AddCommand(newDuplicatesCmd())
