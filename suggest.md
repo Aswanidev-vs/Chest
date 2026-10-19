@@ -1,8 +1,9 @@
 # CHEST — New Feature Suggestions
 
 > **Scope of this document:** analysis-only. No code was modified. Suggestions are grounded in
-> the current state of the codebase (v0.7.0) so that nothing below duplicates what already
-> ships. Items previously proposed in `plan.md` are marked *(plan.md §3-N)* (its section 3,
+> the codebase at **v0.7.0** so that nothing below duplicates what already
+> ships. Items marked ✅ were implemented on top of that baseline and released in **v0.8.0**.
+> Items previously proposed in `plan.md` are marked *(plan.md §3-N)* (its section 3,
 > "Evaluation of Proposed Features", item N) or *(plan.md §4-N)* (section 4, "Additional Ideas",
 > item N); items marked **new** were not in `plan.md`. Effort: **S** = days, **M** = ~1–2 weeks,
 > **L** = multi-week. Risk = chance of regressing existing behavior.
@@ -305,6 +306,7 @@ The dangerous failure mode is a stale index silently answering as if current. Th
 
 ---
 
-*Generated from a read-only review of the CHEST codebase (v0.7.0): CLI surface in
+*Generated from a read-only review of the CHEST codebase at v0.7.0, with the ✅ items above
+implemented and shipped in v0.8.0: CLI surface in
 `internal/cli/root.go`, rule/config/planner packages, watcher/scheduler/plugin/indexer layers,
 plus README/PRD/plan history and open GitHub issues.*
