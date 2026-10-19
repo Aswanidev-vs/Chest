@@ -44,6 +44,7 @@ type sortFlags struct {
 	followSymlinks  bool
 	collision       string
 	allowSystem     bool
+	hashCollisions  bool
 }
 
 func newSortCmd() *cobra.Command {
@@ -98,43 +99,24 @@ func newSortCmd() *cobra.Command {
 			// Collision policy: an empty value (flag left at its default) defers
 			// to the planner's implicit auto-rename default; a value the user
 			// passed explicitly is validated here and forwarded verbatim.
-			collisionPolicy := models.CollisionPolicy(strings.ToLower(f.collision))
-			if collisionPolicy != "" {
-				switch collisionPolicy {
-				case models.CollisionSkip, models.CollisionRename, models.CollisionReplace, models.CollisionAbort:
-				default:
-					return fmt.Errorf("invalid collision policy '%s'. Valid: skip, rename, replace, abort", f.collision)
-				}
+			collisionPolicy, err := normalizeCollisionPolicy(f.collision)
+			if err != nil {
+				return err
 			}
 
-			dateSource := strings.ToLower(f.dateSource)
-			if dateSource == "" {
-				dateSource = "modified"
-			}
-			switch dateSource {
-			case "modified", "auto", "taken", "filename":
-			default:
-				return fmt.Errorf("invalid date source '%s'. Valid: modified, auto, taken, filename", f.dateSource)
+			dateSource, err := normalizeDateSource(f.dateSource)
+			if err != nil {
+				return err
 			}
 
-			dateGranularity := strings.ToLower(f.dateGranularity)
-			if dateGranularity == "" {
-				dateGranularity = "year"
-			}
-			switch dateGranularity {
-			case "year", "month", "day":
-			default:
-				return fmt.Errorf("invalid date granularity '%s'. Valid: year, month, day", f.dateGranularity)
+			dateGranularity, err := normalizeDateGranularity(f.dateGranularity)
+			if err != nil {
+				return err
 			}
 
-			monthFormat := strings.ToLower(f.monthFormat)
-			if monthFormat == "" {
-				monthFormat = "name"
-			}
-			switch monthFormat {
-			case "name", "number":
-			default:
-				return fmt.Errorf("invalid month format '%s'. Valid: name, number", f.monthFormat)
+			monthFormat, err := normalizeMonthFormat(f.monthFormat)
+			if err != nil {
+				return err
 			}
 
 			// Load installed plugins with classifier capability. Their custom
@@ -259,11 +241,20 @@ func newSortCmd() *cobra.Command {
 				flat = true
 			}
 
+			// Content-aware conflict resolution is opt-in: without
+			// --hash-collisions no planner option is added at all, so the plan is
+			// identical to what it has always been.
+			var planOpts []planner.Option
+			planOpts = append(planOpts, planner.WithDate(dateSource, dateGranularity, monthFormat))
+			if f.hashCollisions {
+				planOpts = append(planOpts, planner.WithHashCollisions())
+			}
+
 			var pl *planner.Planner
 			if flat {
-				pl = planner.NewFlat(engine, baseDest, collisionPolicy, planner.WithDate(dateSource, dateGranularity, monthFormat))
+				pl = planner.NewFlat(engine, baseDest, collisionPolicy, planOpts...)
 			} else {
-				pl = planner.New(engine, baseDest, collisionPolicy, planner.WithDate(dateSource, dateGranularity, monthFormat))
+				pl = planner.New(engine, baseDest, collisionPolicy, planOpts...)
 			}
 
 			plan, err := pl.Plan(absTarget, files)
@@ -389,9 +380,64 @@ func newSortCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&f.customRules, "rule", nil, "Custom rule e.g. 'type=video && size>1GB -> Videos/Large'")
 	cmd.Flags().BoolVar(&f.followSymlinks, "follow-symlinks", false, "Follow symbolic links")
 	cmd.Flags().StringVar(&f.collision, "collision", "", "Collision policy: skip, rename, replace, abort (default: auto-rename on conflicts)")
+	cmd.Flags().BoolVar(&f.hashCollisions, "hash-collisions", false, "When two files resolve to the same destination, compare their content: identical files are duplicates and the second is left in place, different files are still auto-renamed")
 	cmd.Flags().BoolVar(&f.allowSystem, "allow-system", false, "Allow modifications in protected OS or system directories")
 
 	return cmd
+}
+
+// normalizeCollisionPolicy lowercases and validates a --collision value. An
+// empty value is passed through untouched so the planner's implicit
+// auto-rename default stays reachable.
+func normalizeCollisionPolicy(raw string) (models.CollisionPolicy, error) {
+	policy := models.CollisionPolicy(strings.ToLower(raw))
+	if policy == "" {
+		return "", nil
+	}
+	switch policy {
+	case models.CollisionSkip, models.CollisionRename, models.CollisionReplace, models.CollisionAbort:
+		return policy, nil
+	}
+	return "", fmt.Errorf("invalid collision policy '%s'. Valid: skip, rename, replace, abort", raw)
+}
+
+// normalizeDateSource lowercases and validates a --date-source value.
+func normalizeDateSource(raw string) (string, error) {
+	source := strings.ToLower(raw)
+	if source == "" {
+		source = "modified"
+	}
+	switch source {
+	case "modified", "auto", "taken", "filename":
+		return source, nil
+	}
+	return "", fmt.Errorf("invalid date source '%s'. Valid: modified, auto, taken, filename", raw)
+}
+
+// normalizeDateGranularity lowercases and validates a --date-granularity value.
+func normalizeDateGranularity(raw string) (string, error) {
+	granularity := strings.ToLower(raw)
+	if granularity == "" {
+		granularity = "year"
+	}
+	switch granularity {
+	case "year", "month", "day":
+		return granularity, nil
+	}
+	return "", fmt.Errorf("invalid date granularity '%s'. Valid: year, month, day", raw)
+}
+
+// normalizeMonthFormat lowercases and validates a --month-format value.
+func normalizeMonthFormat(raw string) (string, error) {
+	format := strings.ToLower(raw)
+	if format == "" {
+		format = "name"
+	}
+	switch format {
+	case "name", "number":
+		return format, nil
+	}
+	return "", fmt.Errorf("invalid month format '%s'. Valid: name, number", raw)
 }
 
 func printDryRun(plan models.Plan, root string) {

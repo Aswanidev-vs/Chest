@@ -71,6 +71,12 @@ func Execute() {
 		if errors.As(err, &th) {
 			os.Exit(3)
 		}
+		// An integrity failure is a successful check that found a problem, so
+		// it exits 4 rather than 1: a script can tell "verify found modified
+		// files" apart from "verify could not run at all".
+		if IsIntegrityFailure(err) {
+			os.Exit(ExitCodeIntegrityFailure)
+		}
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -99,4 +105,11 @@ func init() {
 	rootCmd.AddCommand(newUpdateCmd())
 	rootCmd.AddCommand(newSpeedtestCmd())
 	rootCmd.AddCommand(newBatteryCmd())
+	rootCmd.AddCommand(newCheckpointCmd())
+	rootCmd.AddCommand(newPlanCmd())
+	rootCmd.AddCommand(newRenameCmd())
+	rootCmd.AddCommand(newManifestCmd())
+	rootCmd.AddCommand(newVerifyCmd())
+	rootCmd.AddCommand(newDoctorCmd())
+	rootCmd.AddCommand(newTreeCmd())
 }
