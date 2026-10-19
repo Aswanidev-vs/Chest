@@ -166,7 +166,9 @@ func TestTreeSortOrders(t *testing.T) {
 	for _, c := range bySize.Node.Children {
 		got = append(got, c.Name)
 	}
-	want := []string{"big.bin", "docs", "a.txt", "skipme", "empty"}
+	// Directories first at every level, as `tree` does, then descending size
+	// within each group.
+	want := []string{"docs", "skipme", "empty", "big.bin", "a.txt"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("size order = %v, want %v", got, want)
 	}
@@ -176,7 +178,7 @@ func TestTreeSortOrders(t *testing.T) {
 	for _, c := range byName.Node.Children {
 		got = append(got, c.Name)
 	}
-	want = []string{"a.txt", "big.bin", "docs", "empty", "skipme"}
+	want = []string{"docs", "empty", "skipme", "a.txt", "big.bin"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("name order = %v, want %v", got, want)
 	}
@@ -263,6 +265,57 @@ func TestTreeTruncationIsStatedInTheDrawing(t *testing.T) {
 	}
 }
 
+// TestTreeUnreadDirectoriesNeverClaimZeroSize covers the size cell for a
+// directory the walk stopped above. Its size is unknown, not zero, so drawing
+// "0 B" there would claim a directory that holds files is empty.
+func TestTreeUnreadDirectoriesNeverClaimZeroSize(t *testing.T) {
+	root := treeFixture(t)
+
+	out, _, err := cliRun(t, newTreeCmd(), root, "--depth", "1")
+	if err != nil {
+		t.Fatalf("chest tree: %v", err)
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "below depth limit") {
+			continue
+		}
+		if strings.Contains(line, "0 B") && strings.Contains(line, "█") {
+			t.Errorf("unread directory drew a zero-size bar as though it were measured: %q", line)
+		}
+	}
+}
+
+// TestTreeDirectoriesAreListedBeforeFiles pins the `tree` convention: a reader
+// scanning a level meets every directory before any file.
+func TestTreeDirectoriesAreListedBeforeFiles(t *testing.T) {
+	root := treeFixture(t)
+
+	out, _, err := cliRun(t, newTreeCmd(), root, "--sort", "name")
+	if err != nil {
+		t.Fatalf("chest tree: %v", err)
+	}
+
+	lines := strings.Split(out, "\n")
+	dirs := map[string]bool{"docs": true, "empty": true, "skipme": true}
+	seenFile := false
+	for _, line := range lines {
+		// Only top-level entries start with exactly two spaces and a branch.
+		if !strings.HasPrefix(line, "  ├") && !strings.HasPrefix(line, "  └") {
+			continue
+		}
+		name := strings.Fields(strings.TrimLeft(line, " │├└─"))[0]
+		if dirs[name] {
+			if seenFile {
+				t.Errorf("directory %q was listed after a file:\n%s", name, out)
+				break
+			}
+			continue
+		}
+		seenFile = true
+	}
+}
+
 func TestTreeFlagValidation(t *testing.T) {
 	root := treeFixture(t)
 
@@ -304,9 +357,18 @@ func TestTreeFlagsRegistered(t *testing.T) {
 }
 
 func TestTreeSizeBarScalesAgainstTheWholeTree(t *testing.T) {
-	full := treeSizeCell(&treeNode{Size: 136}, 136)
-	half := treeSizeCell(&treeNode{Size: 68}, 136)
-	zero := treeSizeCell(&treeNode{Size: 0}, 136)
+	// Expanded directories: these stand for folders the walk actually read, so
+	// their Size is a real measurement and the bar is meaningful.
+	full := treeSizeCell(&treeNode{Size: 136, Expanded: true}, 136)
+	half := treeSizeCell(&treeNode{Size: 68, Expanded: true}, 136)
+	zero := treeSizeCell(&treeNode{Size: 0, Expanded: true}, 136)
+
+	// A directory the walk never read has an unknown size, not a zero one, so
+	// it must draw no bar at all rather than an empty-looking zero.
+	unread := treeSizeCell(&treeNode{Size: 0, Expanded: false}, 136)
+	if unread != "" {
+		t.Errorf("an unread directory drew a size instead of leaving the column empty: %q", unread)
+	}
 
 	if !strings.Contains(full, strings.Repeat(chartFull, treeBarWidth)) {
 		t.Errorf("a directory holding the whole tree does not draw a full bar: %q", full)
