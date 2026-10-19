@@ -38,7 +38,7 @@ type SearchOptions struct {
 	IncludeHidden bool
 	Limit         int
 	ClassifyFunc  func(filename, ext string) string // Optional: overrides built-in classifier
-	Progress      func(scanned, matched int)         // Optional: traversal progress (called per file)
+	Progress      func(scanned, matched int)        // Optional: traversal progress (called per file)
 }
 
 // SearchMatch represents a single matching file and optional content snippets
@@ -488,4 +488,3 @@ func matchesDateCondition(modTime time.Time, cond string) bool {
 
 	return true
 }
-

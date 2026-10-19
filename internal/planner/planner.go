@@ -1,7 +1,11 @@
 package planner
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -31,6 +35,10 @@ type Planner struct {
 	// baseDestination (ignoring the rule's category subfolder). Used by --name
 	// so users get a single named folder instead of named/category/.
 	flatDestination bool
+	// hashCollisions enables content-aware conflict resolution. It is opt-in
+	// (--hash-collisions) and off by default; when off, Plan never opens a file
+	// and the produced plan is identical to the pre-flag behavior.
+	hashCollisions bool
 }
 
 // Option configures planner behavior without changing the existing constructor signature.
@@ -43,6 +51,18 @@ func WithDate(source, granularity, monthFormat string) Option {
 		p.dateSource = source
 		p.dateGranularity = granularity
 		p.dateMonthFormat = monthFormat
+	}
+}
+
+// WithHashCollisions turns on content-aware conflict resolution. Only the
+// files that actually collide on a destination are hashed, never the whole
+// tree: a genuine duplicate (identical SHA-256) is left in place instead of
+// being auto-renamed, while distinct content keeps the normal auto-rename.
+// Without this option no file is opened and planning is byte-for-byte the
+// behavior it has always had.
+func WithHashCollisions() Option {
+	return func(p *Planner) {
+		p.hashCollisions = true
 	}
 }
 
@@ -96,7 +116,14 @@ func (p *Planner) expandDestination(destination string, file models.File) (strin
 }
 
 func (p *Planner) dateFor(file models.File) (time.Time, bool) {
-	source := p.dateSource
+	return ResolveDate(file, p.dateSource)
+}
+
+// ResolveDate picks the calendar date a file is filed under, honoring the
+// same date sources the planner supports for sorting. It is exported so other
+// commands (chest rename) can reuse the exact same date semantics instead of
+// re-implementing them: an empty or unknown source behaves as "modified".
+func ResolveDate(file models.File, source string) (time.Time, bool) {
 	if source == "" {
 		source = "modified"
 	}
@@ -192,6 +219,79 @@ func resolveUniqueTarget(targetFile string, claimed map[string]string) (string, 
 	}
 }
 
+// contentHasher memoizes SHA-256 digests for the duration of a single Plan
+// call. It exists so content-aware collision resolution reads each file at
+// most once and, more importantly, reads nothing at all unless a file is
+// genuinely part of a conflict set: hasher.identical is only ever called from
+// inside the intra-plan collision branch, so files that never collide are
+// never opened.
+type contentHasher struct {
+	digests map[string]string
+	unread  map[string]bool
+}
+
+func newContentHasher() *contentHasher {
+	return &contentHasher{
+		digests: make(map[string]string),
+		unread:  make(map[string]bool),
+	}
+}
+
+// digest returns the cached SHA-256 of path. A file that cannot be read is
+// remembered as unread so a later conflict in the same plan does not retry it.
+func (h *contentHasher) digest(path string) (string, bool) {
+	if sum, ok := h.digests[path]; ok {
+		return sum, true
+	}
+	if h.unread[path] {
+		return "", false
+	}
+	sum, err := sha256File(path)
+	if err != nil {
+		h.unread[path] = true
+		return "", false
+	}
+	h.digests[path] = sum
+	return sum, true
+}
+
+// identical reports whether two paths hold byte-identical content. Any file
+// that cannot be hashed is reported as distinct, which degrades to the normal
+// (safe) auto-rename resolution instead of ever skipping a file on a guess.
+func (h *contentHasher) identical(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	first, ok := h.digest(a)
+	if !ok {
+		return false
+	}
+	second, ok := h.digest(b)
+	if !ok {
+		return false
+	}
+	return first == second
+}
+
+// sha256File streams a file through SHA-256 and returns the hex digest. It is
+// held in a variable purely so tests can observe exactly which files
+// content-aware collision resolution opens; production code never reassigns it.
+var sha256File = streamSHA256
+
+func streamSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
 // Plan creates the proposed set of operations
 func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 	plan := models.Plan{
@@ -204,6 +304,9 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 	// files resolving to the same destination are both planned and the second
 	// move silently overwrites the first at execute time.
 	claimed := make(map[string]string)
+	// hasher stays empty unless --hash-collisions is set AND a conflict is
+	// actually found, so the default plan never touches a file.
+	var hasher *contentHasher
 
 	for _, file := range files {
 		plan.TotalFiles++
@@ -258,6 +361,26 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 		action := p.collisionPolicy
 
 		if isCollision {
+			// Content-aware resolution is strictly opt-in and only ever looks at
+			// the two files that share this one destination. A genuine duplicate
+			// (identical SHA-256) stays exactly where it is instead of piling up
+			// as "name (1).ext"; distinct content falls through to the normal
+			// per-policy resolution below. The abort policy is left untouched: the
+			// user asked for the whole run to stop on any collision.
+			if p.hashCollisions && claimedInPlan && p.collisionPolicy != models.CollisionAbort {
+				if hasher == nil {
+					hasher = newContentHasher()
+				}
+				if hasher.identical(firstClaimer, file.Path) {
+					plan.Conflicts = append(plan.Conflicts, models.PlanConflict{
+						Target:     file.Path,
+						Sources:    []string{firstClaimer, file.Path},
+						Resolution: "identical content (sha256 match); duplicate left in place",
+					})
+					plan.SkippedFiles++
+					continue
+				}
+			}
 			switch p.collisionPolicy {
 			case models.CollisionSkip:
 				// A file already on disk keeps today's behavior: skip.

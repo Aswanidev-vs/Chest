@@ -230,6 +230,78 @@
       <div class="commands-catalog">
         <div class="cmd-card">
           <div class="cmd-card-header">
+            <span class="cmd-tag">chest plan</span>
+            <i data-lucide="file-json" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc">Turns a plan into a reviewable JSON artifact without touching disk. <code>chest plan apply</code> executes it after re-validating every source — all-or-nothing — and records history so <code>undo</code> reverts it. <code>chest plan diff</code> compares two plans.</p>
+          <div class="cmd-snippet">
+            <span>chest plan ~/Downloads -p media --out plan.json</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
+            <span class="cmd-tag">chest checkpoint</span>
+            <i data-lucide="flag" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc">Mark a named point in history, then revert everything after it as one atomic batch with <code>chest undo --to</code>. Selective <code>undo --file</code> reverts a single file and leaves the rest of the run undoable. <code>chest history --prune</code> bounds the log.</p>
+          <div class="cmd-snippet">
+            <span>chest checkpoint --name before-cleanup</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
+            <span class="cmd-tag">chest manifest / verify</span>
+            <i data-lucide="shield-check" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc">Hash a folder into a reproducible SHA-256 inventory, then prove it has not drifted — reporting <code>OK</code>, <code>MODIFIED</code>, <code>MISSING</code> and <code>ADDED</code>. Exits <strong>4</strong> on any drift so scripts can detect it. Both commands are read-only.</p>
+          <div class="cmd-snippet">
+            <span>chest verify ~/Documents --manifest manifest.json</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
+            <span class="cmd-tag">chest rename</span>
+            <i data-lucide="text-cursor-input" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc">Normalize messy filenames in place from a template, using the same date machinery as <code>sort</code>. Dry-run, collision policy, history and full <code>undo</code> — and it never moves a file between folders.</p>
+          <div class="cmd-snippet">
+            <span>chest rename ~/Pictures -r --to "IMG_{year}{month}{day}.{ext}"</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
+            <span class="cmd-tag">chest doctor / tree</span>
+            <i data-lucide="activity" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc"><code>doctor</code> is one read-only health check over index freshness, un-undoable history, unreadable folders, broken symlinks, schedules and rules. <code>tree</code> draws a folder as a box-drawing tree with rolled-up sizes.</p>
+          <div class="cmd-snippet">
+            <span>chest doctor --strict</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
+            <span class="cmd-tag">chest rule eval</span>
+            <i data-lucide="search-check" style="color: var(--text-dim);"></i>
+          </div>
+          <p class="cmd-desc">Explain which rule matches a given file, why it matched and where it would go. <code>rule check</code> validates syntax; <code>rule eval</code> validates behaviour. Read-only.</p>
+          <div class="cmd-snippet">
+            <span>chest rule eval ~/Downloads/photo.jpg -p media</span>
+            <i data-lucide="chevron-right"></i>
+          </div>
+        </div>
+
+        <div class="cmd-card">
+          <div class="cmd-card-header">
             <span class="cmd-tag">chest sort</span>
             <i data-lucide="arrow-right-left" style="color: var(--text-dim);"></i>
           </div>

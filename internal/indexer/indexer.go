@@ -120,6 +120,21 @@ func OpenOrCreate(customPath ...string) (*Store, error) {
 		key TEXT PRIMARY KEY,
 		value TEXT
 	);
+
+	-- Point-in-time storage totals captured by "chest stats", used to report
+	-- growth over time. Additive only: every statement is CREATE ... IF NOT
+	-- EXISTS so an index.db written by an older CHEST opens unchanged.
+	CREATE TABLE IF NOT EXISTS storage_snapshots (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		captured_at INTEGER,
+		scope TEXT,
+		total_files INTEGER,
+		total_size INTEGER,
+		category_counts TEXT,
+		category_sizes TEXT
+	);
+	CREATE INDEX IF NOT EXISTS idx_storage_snapshots_scope_time
+		ON storage_snapshots(scope, captured_at);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
@@ -565,6 +580,14 @@ func isExcludedPath(name, root, path string, exclusions map[string]struct{}) boo
 		}
 	}
 	return false
+}
+
+// IsExcluded reports whether a walk entry is skipped by the same exclusion
+// rules IndexDirectory applies. Long-running consumers (e.g. watch mode) use
+// it so the set of directories they monitor and the set the indexer walks can
+// never drift apart.
+func (s *Store) IsExcluded(name, root, path string, exclusions ...[]string) bool {
+	return isExcludedPath(name, root, path, exclSetFromArgs(exclusions...))
 }
 
 // exclSetFromArgs flattens one or more comma-separated exclusion lists into a
