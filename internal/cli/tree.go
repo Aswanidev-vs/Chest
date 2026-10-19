@@ -260,13 +260,11 @@ func scanTreeNode(path string, level, maxDepth int, sortBy string, excl *manifes
 func sortTreeChildren(children []*treeNode, sortBy string) {
 	sort.SliceStable(children, func(i, j int) bool {
 		a, b := children[i], children[j]
-		if sortBy == "name" {
-			return treeKey(a, sortBy) < treeKey(b, sortBy)
-		}
-		// Directories before files at equal size: a folder and one file of the
-		// same size are not the same kind of thing, and grouping the folders
-		// together reads better than interleaving them.
-		if (a.Size == b.Size) && a.IsFile != b.IsFile {
+		// Directories first, always — not only at equal size. A folder and a
+		// file are not the same kind of thing, so a reader scanning a level
+		// should meet every folder before any file, and the rolled-up sizes
+		// stay grouped. This is what `tree` does.
+		if a.IsFile != b.IsFile {
 			return !a.IsFile
 		}
 		return treeKey(a, sortBy) < treeKey(b, sortBy)
@@ -355,6 +353,13 @@ func printTreeRow(w io.Writer, n *treeNode, prefix string, last bool, total int6
 // still draws a cell — `bar` guarantees that — so "almost nothing" never looks
 // like "nothing at all".
 func treeSizeCell(n *treeNode, total int64) string {
+	// A directory the walk stopped above was never read, so its size is not
+	// zero — it is unknown. Printing "0 B" there claims a directory that
+	// demonstrably holds files is empty. treeCountCell carries the reason, so
+	// the size column just stays empty.
+	if !n.IsFile && !n.Expanded {
+		return ""
+	}
 	frac := 0.0
 	if total > 0 {
 		frac = float64(n.Size) / float64(total)
@@ -362,8 +367,16 @@ func treeSizeCell(n *treeNode, total int64) string {
 	if n.Size == 0 {
 		frac = 0
 	}
+	size := formatFileSize(n.Size)
+	if !n.IsFile && n.NotExpanded > 0 && n.Size > 0 {
+		// Partly read, so what is shown is a floor rather than the whole
+		// subtree; the marker keeps the number from reading as a total. A
+		// floor of zero says nothing, so it is left unmarked — the count cell
+		// already says how many directories went unread.
+		size = "≥ " + size
+	}
 	return fmt.Sprintf("  \x1b[38;5;75m%s\x1b[0m %s",
-		bar(frac, treeBarWidth), formatFileSize(n.Size))
+		bar(frac, treeBarWidth), size)
 }
 
 // treeCountCell names what the size covers. A directory that was never read
