@@ -72,6 +72,7 @@
             <li><a class="docs-nav-link" href="#cmd-battery">chest battery</a></li>
             <li><a class="docs-nav-link" href="#cmd-man">man, preset & version</a></li>
             <li><a class="docs-nav-link" href="#cmd-completion">chest completion</a></li>
+            <li><a class="docs-nav-link" href="#cmd-integrity"><strong>Plan &amp; Integrity</strong></a></li>
           </ul>
         </div>
 
@@ -1095,6 +1096,121 @@ Continue? [y/N]: y
                 <td>string</td>
                 <td>Shell to generate for: <code>bash</code>, <code>zsh</code>, <code>fish</code>.</td>
               </tr>
+            </tbody>
+          </table>
+
+          <!-- Section: Plan, Safety & Integrity -->
+          <h2 id="cmd-integrity"><i data-lucide="shield-check"></i> Plan, Safety & Integrity</h2>
+
+          <div class="callout-box info">
+            <i data-lucide="info" style="color: var(--accent-cyan); font-size: 1.4rem; margin-top: 2px;"></i>
+            <div>
+              <p><strong>Every command in this section is safe by default.</strong> <code>plan</code>, <code>manifest</code>, <code>verify</code>, <code>doctor</code>, <code>tree</code> and <code>rule eval</code> never move, rename or delete a file. The only ones that mutate are <code>rename</code> and <code>plan apply</code> — and both record history, so <code>chest undo</code> reverts them.</p>
+            </div>
+          </div>
+
+          <h3 id="cmd-plan">chest plan</h3>
+          <p>Turns a sorting plan into a reviewable, replayable JSON artifact. <code>chest plan --out</code> runs the same scan/classify/plan pipeline as <code>sort</code> but moves nothing.</p>
+
+          <table class="flag-table">
+            <thead><tr><th>Flag</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="flag-badge">--out &lt;file&gt;</span></td><td>string</td><td>Write the plan JSON to <code>FILE</code>. Strictly read-only: no folder is created and no file moves.</td></tr>
+              <tr><td><span class="flag-badge">-y, --yes</span></td><td>boolean</td><td>Skip confirmation on <code>apply</code>.</td></tr>
+              <tr><td><span class="flag-badge">-r, --recursive</span></td><td>boolean</td><td>Include subdirectories (same meaning as <code>chest sort -r</code>).</td></tr>
+              <tr><td><span class="flag-badge">-p, --preset</span></td><td>string</td><td>Built-in preset. Rules resolve with identical precedence to <code>sort</code>.</td></tr>
+            </tbody>
+          </table>
+
+          <div class="callout-box warn">
+            <i data-lucide="alert-triangle" style="color: var(--accent-cyan); font-size: 1.4rem; margin-top: 2px;"></i>
+            <div>
+              <p><code>chest plan apply</code> is <strong>all-or-nothing</strong>: it re-validates every source first and refuses the entire batch if any file has moved, rather than half-applying. It records history, so <code>chest undo</code> reverts it.</p>
+            </div>
+          </div>
+
+          <h3 id="cmd-checkpoint">chest checkpoint &amp; undo --to</h3>
+          <p>Mark a named point in history, then revert everything after it as one atomic batch.</p>
+
+          <table class="flag-table">
+            <thead><tr><th>Flag</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="flag-badge">-n, --name &lt;label&gt;</span></td><td>string</td><td>Label for the checkpoint (may also be given positionally). Moves no files itself.</td></tr>
+              <tr><td><span class="flag-badge">--to &lt;label&gt;</span></td><td>string</td><td>On <code>undo</code>: revert every operation recorded after that checkpoint, as one atomic batch.</td></tr>
+              <tr><td><span class="flag-badge">--file &lt;name&gt;</span></td><td>string</td><td>On <code>undo</code>: revert only the operations of that entry matching this basename (repeatable).</td></tr>
+              <tr><td><span class="flag-badge">--prune --keep &lt;n&gt;</span></td><td>integer</td><td>On <code>history</code>: drop the oldest entries, keeping the newest <code>n</code> (default 100), so the log cannot grow unbounded.</td></tr>
+            </tbody>
+          </table>
+
+          <h3 id="cmd-manifest">chest manifest &amp; chest verify</h3>
+          <p>Hash a folder into a reproducible SHA-256 inventory, then prove it has not drifted.</p>
+
+          <table class="flag-table">
+            <thead><tr><th>Flag</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="flag-badge">-o, --out &lt;file&gt;</span></td><td>string</td><td>Write the manifest to <code>FILE</code>. Byte-reproducible: no run timestamp, so an unchanged tree regenerates an identical file.</td></tr>
+              <tr><td><span class="flag-badge">--manifest &lt;file&gt;</span></td><td>string</td><td>On <code>verify</code>: the manifest to verify against (required).</td></tr>
+              <tr><td><span class="flag-badge">--max-size &lt;size&gt;</span></td><td>string</td><td>Skip hashing files larger than this (default <code>500MB</code>). Skipped files are reported, never silently dropped.</td></tr>
+              <tr><td><span class="flag-badge">--json / --csv</span></td><td>boolean</td><td>Machine-readable output for scripting.</td></tr>
+            </tbody>
+          </table>
+
+          <div class="callout-box">
+            <i data-lucide="check-circle" style="color: var(--accent-cyan); font-size: 1.4rem; margin-top: 2px;"></i>
+            <div>
+              <p><code>chest verify</code> exits <strong>0</strong> when everything matches and <strong>4</strong> when any file differs, so a script can distinguish "the backup drifted" from "verify could not run". (CHEST reserves <strong>1</strong> for a genuine error and <strong>3</strong> for a battery threshold breach.)</p>
+            </div>
+          </div>
+
+          <h3 id="cmd-rename">chest rename</h3>
+          <p>Batch-rename files <strong>in place</strong> from a template. It never moves a file between directories.</p>
+
+          <table class="flag-table">
+            <thead><tr><th>Flag</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="flag-badge">--to &lt;template&gt;</span></td><td>string</td><td>Rename template (required). Placeholders: <code>{ext}</code> (lowercase extension <em>without</em> its dot — write <code>photo.{ext}</code>), <code>{date}</code>, <code>{year}</code>, <code>{month}</code>, <code>{day}</code>. Must not contain path separators.</td></tr>
+              <tr><td><span class="flag-badge">--date-source</span></td><td>string</td><td>Which date the placeholders use: <code>modified</code> (default), <code>auto</code>, <code>taken</code>, <code>filename</code>.</td></tr>
+              <tr><td><span class="flag-badge">-n, --dry-run</span></td><td>boolean</td><td>Preview every rename without touching disk.</td></tr>
+              <tr><td><span class="flag-badge">--collision</span></td><td>string</td><td><code>skip</code>, <code>rename</code> (default), <code>replace</code>, <code>abort</code>. The default walks the <code>photo (1).jpg</code> chain so nothing is ever overwritten silently.</td></tr>
+            </tbody>
+          </table>
+
+          <h3 id="cmd-doctor">chest doctor &amp; chest tree</h3>
+          <p>Read-only inspection of CHEST's own state, and of a folder's shape.</p>
+
+          <table class="flag-table">
+            <thead><tr><th>Flag</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="flag-badge">--strict</span></td><td>boolean</td><td>On <code>doctor</code>: exit non-zero when any check fails. Warnings alone exit 0.</td></tr>
+              <tr><td><span class="flag-badge">--depth &lt;n&gt;</span></td><td>integer</td><td>On <code>tree</code>: how many levels to descend (default 3). When truncated, the output states what was left unread.</td></tr>
+              <tr><td><span class="flag-badge">--sort &lt;field&gt;</span></td><td>string</td><td>On <code>tree</code>: <code>size</code> (default) or <code>name</code>.</td></tr>
+            </tbody>
+          </table>
+
+          <h3 id="cmd-ruleeval">chest rule eval</h3>
+          <p>Explain which rule matches a given file, why, and where it would go — read-only. <code>rule check</code> validates <em>syntax</em>; <code>rule eval</code> validates <em>behaviour</em>.</p>
+
+          <h3 id="cmd-hashcollisions">Content-aware collisions</h3>
+          <p><code>chest sort --hash-collisions</code> resolves same-destination conflicts by content instead of guessing.</p>
+
+          <table class="flag-table">
+            <thead><tr><th>Flag</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="flag-badge">--hash-collisions</span></td><td>boolean</td><td>Hash <strong>only the files involved in a collision</strong> — never the whole tree. Same SHA-256 means a genuine duplicate, so the second copy is skipped; different content means both are distinct, so the second is auto-renamed rather than clobbering the first.</td></tr>
+              <tr><td><span class="flag-badge">--similar</span></td><td>boolean</td><td>On <code>duplicates</code>: group near-duplicate images by perceptual hash (DCT-based, stdlib only), reported separately from exact SHA-256 matches.</td></tr>
+              <tr><td><span class="flag-badge">--threshold &lt;0-64&gt;</span></td><td>integer</td><td>Hamming distance tolerance for <code>--similar</code> (default 10).</td></tr>
+              <tr><td><span class="flag-badge">--quarantine &lt;dir&gt;</span></td><td>string</td><td>On <code>duplicates</code>: opt-in, moves duplicates into a staging folder after confirmation. Never deletes, and is recorded in history so <code>undo</code> restores them.</td></tr>
+            </tbody>
+          </table>
+
+          <h3 id="cmd-liveindex">Continuous indexing &amp; trends</h3>
+          <table class="flag-table">
+            <thead><tr><th>Flag</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td><span class="flag-badge">--watch</span></td><td>boolean</td><td>On <code>index</code>: keep the index warm as files change, until Ctrl+C. Reuses the same incremental <code>size + mtime</code> skip.</td></tr>
+              <tr><td><span class="flag-badge">--debounce &lt;dur&gt;</span></td><td>duration</td><td>Settle time before re-indexing a burst of changes (default <code>500ms</code>).</td></tr>
+              <tr><td><span class="flag-badge">--trend</span></td><td>boolean</td><td>On <code>stats</code>: report growth against a recorded snapshot.</td></tr>
+              <tr><td><span class="flag-badge">--day / --week / --month</span></td><td>boolean</td><td>Trend window (default <code>--month</code>).</td></tr>
             </tbody>
           </table>
 

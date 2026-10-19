@@ -127,7 +127,7 @@ Protected system directories are refused outright; 'repl' has no
 			"-i, --into <dir>     Base destination directory for planned moves",
 			"-r, --recursive      Include subdirectories in the scan",
 			"-H, --hidden         Include hidden files and folders",
-			"-x, --exclude <list>  Skip files or folders (e.g. '.git,node_modules')",
+			"-x, --exclude <list>   Skip files or folders (e.g. '.git,node_modules')",
 			"-c, --collision      Collision policy: skip, rename, replace, abort (default: auto-rename on intra-plan conflicts)",
 			"-y, --yes            Skip the confirmation prompt on apply",
 		},
@@ -616,6 +616,235 @@ unparseable size values and unsupported field/operator combinations.`,
 			"chest rule check ~/Code                              Validate discovered chest.toml rules",
 		},
 		SeeAlso: []string{"sort", "repl"},
+	},
+	"plan": {
+		Name:     "CHEST-PLAN(1) - Plan Artifacts",
+		Synopsis: "chest plan [path] [flags] | chest plan apply <plan.json> | chest plan diff <a.json> <b.json>",
+		Description: `Turns a sorting plan into a reviewable, replayable JSON artifact.
+
+'chest plan --out' runs the same scan, classify and plan pipeline as 'chest sort' but is
+strictly read-only: it never creates a folder and never moves a file. 'chest plan apply'
+executes a saved plan after confirmation, re-validating every source first and refusing the
+whole batch if any source has moved. 'chest plan diff' compares two saved plans and reports
+added, removed and changed operations.
+
+Applying a plan records history, so 'chest undo' reverts it.`,
+		Options: []string{
+			"-t, --type           Sort files into category folders",
+			"-f, --format         Group by content-detected format",
+			"-s, --size           Group by size thresholds",
+			"-d, --date           Group by date (see --date-source / --date-granularity)",
+			"-p, --preset <name>  Apply a built-in preset",
+			"-r, --rule <spec>    Custom rule (repeatable)",
+			"-i, --into <dir>     Custom destination root",
+			"--name <dir>         Flat destination folder (cannot combine with --into)",
+			"--date-source <src>  modified (default), auto, taken, filename",
+			"--date-granularity   year (default), month, day",
+			"--month-format       name (default, Jan), number (01)",
+			"-r, --recursive      Include subdirectories",
+			"-x, --exclude <list>  Exclude files or folders (comma-separated)",
+			"--hidden             Include hidden files",
+			"--collision <policy>  skip, rename, replace, abort",
+			"--follow-symlinks    Follow symbolic links",
+			"--allow-system       Allow protected OS or system directories",
+			"--out <file>         Write the plan JSON to FILE (default: stdout)",
+			"-y, --yes            Skip confirmation (apply only)",
+		},
+		Examples: []string{
+			"chest plan ~/Downloads -p media --out plan.json   Save a plan without touching files",
+			"chest plan . --rule \"type=video -> Videos\" --out plan.json",
+			"chest plan apply plan.json    Execute the saved plan (asks first)",
+			"chest plan diff before.json after.json",
+		},
+		SeeAlso: []string{"sort", "undo", "rule"},
+	},
+	"rename": {
+		Name:     "CHEST-RENAME(1) - Batch Rename",
+		Synopsis: "chest rename [directory] --to <template> [flags]",
+		Description: `Renames files in place using a template, without ever moving a file between
+directories. Every scanned file is renamed to the --to template, which accepts the same
+placeholders CHEST uses for destinations.
+
+  {ext}    lowercase extension without its dot, e.g. jpg — write "photo.{ext}"
+  {date}   year, year-month or year-month-day depending on --date-granularity
+  {year}   four digit year
+  {month}  month, as Jan or 01 depending on --month-format
+  {day}    two digit day of month
+
+The template must not contain path separators. Where --to produces a name that is already
+taken, the collision policy decides; the default walks the "photo (1).jpg" chain so nothing
+is ever overwritten silently. Renames are recorded in history, so 'chest undo' restores the
+original names exactly.`,
+		Options: []string{
+			"--to <template>      Rename template (required), e.g. \"{year}-{month}-{day}.{ext}\"",
+			"--date-source <src>  modified (default), auto, taken, filename",
+			"--date-granularity   year (default), month, day",
+			"--month-format       name (default), number",
+			"--collision <policy>  skip, rename (default), replace, abort",
+			"-t, --type           Rename only files matching this category",
+			"-f, --format         Rename only files of this detected format",
+			"-s, --size           Rename only files in this size bucket",
+			"-d, --date           Rename only files in this date bucket",
+			"-p, --preset <name>  Rename only files matched by a preset",
+			"--rule <spec>        Custom rule selecting which files to rename (repeatable)",
+			"-n, --dry-run        Preview renames without touching disk",
+			"-r, --recursive      Include subdirectories",
+			"-x, --exclude <list>  Exclude files or folders",
+			"-v, --verbose        Detailed output",
+			"-q, --quiet          Minimal output",
+			"--hidden             Include hidden files",
+			"--follow-symlinks    Follow symbolic links",
+			"--allow-system       Allow protected OS or system directories",
+			"--json               Output the rename plan as JSON",
+		},
+		Examples: []string{
+			"chest rename . --to \"{year}-{month}-{day}.{ext}\" --date-source filename",
+			"chest rename ~/Pictures -r --to \"IMG_{year}{month}{day}.{ext}\" --date-source filename",
+			"chest rename Downloads --to \"{year}-{month}.{ext}\" --rule \"ext=jpg -> Photos\"",
+			"chest rename . --to \"scan-{year}.{ext}\" --dry-run",
+		},
+		SeeAlso: []string{"sort", "undo"},
+	},
+	"manifest": {
+		Name:     "CHEST-MANIFEST(1) - Hash Inventory",
+		Synopsis: "chest manifest <directory> [flags]",
+		Description: `Hashes a directory into a SHA-256 inventory so a later 'chest verify' can prove
+the files are unchanged. The manifest is byte-reproducible: it carries no run timestamp, so
+regenerating it for an unchanged tree produces an identical file.
+
+Read-only — the manifest command never modifies what it scans. Files larger than --max-size
+are recorded as skipped and reported, never silently dropped. A manifest written inside the
+tree it describes is excluded from its own inventory.`,
+		Options: []string{
+			"-o, --out <file>     Write the manifest to FILE (default: stdout)",
+			"--csv                Emit CSV instead of JSON",
+			"--max-size <size>    Skip hashing files larger than this (default 500MB)",
+			"-x, --exclude <list>  Exclude files or folders (comma-separated)",
+		},
+		Examples: []string{
+			"chest manifest ~/Documents --out manifest.json",
+			"chest manifest . --csv --out manifest.csv",
+			"chest manifest /backup --max-size 2GB",
+		},
+		SeeAlso: []string{"verify", "duplicates"},
+	},
+	"verify": {
+		Name:     "CHEST-VERIFY(1) - Integrity Check",
+		Synopsis: "chest verify <directory> --manifest <file> [flags]",
+		Description: `Re-hashes a directory and compares it against a manifest produced by
+'chest manifest', reporting each file as OK, MODIFIED, MISSING, or ADDED.
+
+Exits 0 when everything matches, and 4 when any file differs, so a script can tell "the backup
+drifted" apart from "verify could not run". Files over --max-size are reported as UNCHECKED
+rather than silently passed. Read-only: verify never modifies the files it checks.`,
+		Options: []string{
+			"--manifest <file>    Manifest document to verify against (required)",
+			"--max-size <size>    Skip hashing files larger than this (default 500MB)",
+			"-x, --exclude <list>  Exclude files or folders (comma-separated)",
+			"--json               Output the result as JSON",
+			"--csv                Output the result as CSV",
+			"--out <file>         Write the machine-readable report to FILE",
+		},
+		Examples: []string{
+			"chest verify . --manifest manifest.json",
+			"chest verify /backup --manifest manifest.json -x node_modules",
+			"chest verify . --manifest manifest.json --json --out verify.json",
+		},
+		SeeAlso: []string{"manifest", "duplicates"},
+	},
+	"doctor": {
+		Name:     "CHEST-DOCTOR(1) - Health Check",
+		Synopsis: "chest doctor [path] [flags]",
+		Description: `One read-only health check over CHEST's own state: whether the index still matches
+disk, whether recorded history can still be undone, unreadable directories, broken symlinks,
+registered schedules, and whether the resolved rule set for a directory is valid.
+
+Doctor opens the index read-only and never writes to it. Warnings alone exit 0; pass --strict
+to fail when anything is wrong, for use in scripts.`,
+		Options: []string{
+			"--strict             Exit non-zero when any check fails",
+			"--json               Output the findings as JSON",
+			"--csv                Output the findings as CSV",
+			"--out <file>         Write the machine-readable report to FILE",
+			"-x, --exclude <list>  Exclude files or folders (comma-separated)",
+		},
+		Examples: []string{
+			"chest doctor              Check the current directory",
+			"chest doctor ~/Downloads --strict",
+			"chest doctor --json --out health.json",
+		},
+		SeeAlso: []string{"index", "history", "rule"},
+	},
+	"tree": {
+		Name:     "CHEST-TREE(1) - Directory Tree",
+		Synopsis: "chest tree [path] [flags]",
+		Description: `Draws a directory as a box-drawing tree with rolled-up sizes and proportional
+bars, so the largest folders are visible at a glance. Reads directory entries only — no file
+contents are opened, so it stays fast on large trees.
+
+Read-only and symlink-safe. When --depth truncates the walk, the output states what was left
+unread rather than implying the tree was complete.`,
+		Options: []string{
+			"--depth <n>          How many levels to descend (default 3)",
+			"--sort <field>       size (default) or name",
+			"--json               Output the tree as JSON",
+			"-x, --exclude <list>  Exclude files or folders (comma-separated)",
+		},
+		Examples: []string{
+			"chest tree ~/Downloads --depth 2",
+			"chest tree . --sort name",
+			"chest tree . --json --out tree.json",
+		},
+		SeeAlso: []string{"stats", "analyze"},
+	},
+	"checkpoint": {
+		Name:     "CHEST-CHECKPOINT(1) - History Markers",
+		Synopsis: "chest checkpoint [name] [flags] | chest checkpoint list",
+		Description: `Records a named marker at the current position in the undo history. A checkpoint moves
+no files by itself; it exists so that later work can be reverted as one batch.
+
+'chest undo --to <label>' then reverts every operation recorded after that label as a single
+atomic batch: the whole batch is validated first, and if any file cannot be restored nothing
+is moved at all.
+
+Checkpoints survive history pruning, so a label stays usable even as older entries age out.`,
+		Options: []string{
+			"-n, --name <label>   Label for the checkpoint (may also be given positionally)",
+			"--json               Output the checkpoint list as JSON",
+			"--csv                Output the checkpoint list as CSV",
+			"--out <file>         Write the checkpoint list to FILE",
+		},
+		Examples: []string{
+			"chest checkpoint --name before-cleanup",
+			"chest checkpoint before-import",
+			"chest undo --to before-cleanup",
+			"chest checkpoint list",
+		},
+		SeeAlso: []string{"undo", "history"},
+	},
+	"preset": {
+		Name:     "CHEST-PRESET(1) - Built-in Presets",
+		Synopsis: "chest preset [flags]",
+		Description: `Lists the built-in sorting presets. A preset is a named bundle of rules that can be
+passed to 'chest sort --preset' to organize a directory without writing any rules by hand.
+
+Built-in presets: downloads, media, documents, developer, photos.`,
+		Options: []string{},
+		Examples: []string{
+			"chest preset                      List available presets",
+			"chest sort ~/Downloads -p downloads",
+		},
+		SeeAlso: []string{"sort", "repl"},
+	},
+	"version": {
+		Name:        "CHEST-VERSION(1) - Version Information",
+		Synopsis:    "chest version",
+		Description: `Prints the CHEST version and the platform it was built for.`,
+		Options:     []string{},
+		Examples: []string{
+			"chest version",
+		},
+		SeeAlso: []string{"update"},
 	},
 }
 
