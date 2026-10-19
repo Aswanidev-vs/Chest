@@ -112,7 +112,7 @@ make build
 | `chest manifest` | Hash a folder into a reproducible SHA-256 inventory for backup verification; read-only, `--csv`, `--max-size` | `chest manifest ~/Documents --out manifest.json` |
 | `chest verify` | Re-hash a folder against a manifest and report OK / MODIFIED / MISSING / ADDED; exits **4** when anything differs so scripts can detect drift | `chest verify ~/Documents --manifest manifest.json` |
 | `chest doctor` | One read-only health check: index freshness vs. disk, un-undoable history entries, unreadable directories, broken symlinks, schedules and rule validity (`--strict` to fail) | `chest doctor --strict` |
-| `chest tree` | Draw a folder as a box-drawing tree with rolled-up sizes and proportional bars; `--depth`, `--sort size\|name`, `--json` | `chest tree ~/Downloads --depth 2` |
+| `chest tree` | Draw a folder as a box-drawing tree with rolled-up sizes and proportional bars; `--depth`, `--sort size\|name`, `--json`, `--exclude` (comma- or space-separated names), plus saved `--implicit` / `--explicit` / `--remove` lists — `.git` is skipped implicitly by default | `chest tree ~/Downloads --depth 2` |
 | `chest schedule` | Periodic organizing via cron: `add --cron "0 2 * * *"`, `list`, `remove`, `run-now`; `--print-cron` shows the crontab line without installing | `chest schedule add --cron "0 2 * * *" -p downloads ~/Downloads` |
 | `chest plugin` | Manage external plugins (`list`, `info`, `install`, `remove`) | `chest plugin list` |
 | `chest clean` | Clear cached SQLite index with confirmation (`-y` to skip, `--all` for DB, `--history` to also wipe undo history, `--battery` to also delete recorded battery history — not implied by `--all`) | `chest clean -y` |

@@ -783,17 +783,24 @@ bars, so the largest folders are visible at a glance. Reads directory entries on
 contents are opened, so it stays fast on large trees.
 
 Read-only and symlink-safe. When --depth truncates the walk, the output states what was left
-unread rather than implying the tree was complete.`,
+unread rather than implying the tree was complete. .git is skipped by default through the
+implicit list; --implicit, --explicit and --remove maintain the saved lists in
+~/.chest/tree_flags.toml.`,
 		Options: []string{
 			"--depth <n>          How many levels to descend (default 3)",
 			"--sort <field>       size (default) or name",
 			"--json               Output the tree as JSON",
-			"-x, --exclude <list>  Exclude files or folders (comma-separated)",
+			"-x, --exclude <names>  Skip this run only: comma-separated or listed after the flag",
+			"--implicit <names>    Save names to skip on every run (.git is already there)",
+			"--explicit <names>    Save names to draw even when implicit or excluded",
+			"--remove <names>      Drop names from the saved implicit/explicit lists",
 		},
 		Examples: []string{
 			"chest tree ~/Downloads --depth 2",
 			"chest tree . --sort name",
 			"chest tree . --json --out tree.json",
+			"chest tree ./ --exclude node_modules .mimocode",
+			"chest tree ./ --implicit node_modules",
 		},
 		SeeAlso: []string{"stats", "analyze"},
 	},
