@@ -204,7 +204,14 @@ with none of them every scanned file is renamed.`,
 
 			if len(plan.Operations) == 0 {
 				if !f.quiet {
-					fmt.Fprintln(out, "No files matched for renaming.")
+					// A file that matched and was then skipped has its reason
+					// listed above; saying "no files matched" there would be
+					// wrong, because the rule did match.
+					if len(problems) > 0 {
+						fmt.Fprintln(out, "Nothing was renamed; see the reasons above.")
+					} else {
+						fmt.Fprintln(out, "No files matched for renaming.")
+					}
 				}
 				return nil
 			}
@@ -376,9 +383,14 @@ func buildRenamePlan(root string, files []models.File, opts renameOptions) (mode
 		}
 
 		if filesystem.CaseKey(targetFile) == filesystem.CaseKey(file.Path) {
-			// Nothing to do: either the name is identical, or it differs only by
-			// case on a case-insensitive filesystem where a rename is a no-op.
+			// Nothing to do: either the name is already exactly right, or it
+			// differs only by case on a case-insensitive filesystem where a
+			// rename is a no-op. Reported like every other skip, so a file that
+			// did match is never reported as "no files matched".
 			plan.SkippedFiles++
+			if file.Path != targetFile {
+				problems = append(problems, fmt.Sprintf("%s differs from the template only by case, which is a no-op on this filesystem; left unchanged", file.Name))
+			}
 			continue
 		}
 

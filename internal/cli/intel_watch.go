@@ -89,6 +89,11 @@ func runIndexWatch(ctx context.Context, w io.Writer, store *indexer.Store, root 
 		timer   *time.Timer
 		passes  int
 		updated int
+		// unwatched counts directories CHEST could not register a watch for,
+		// which it will therefore never track. It is reported rather than
+		// swallowed, because the usual cause is a platform watch-descriptor
+		// limit and the failure is otherwise invisible.
+		unwatched int
 	)
 
 	// drain cancels any pending pass and waits for an in-flight one. Every
@@ -145,6 +150,9 @@ func runIndexWatch(ctx context.Context, w io.Writer, store *indexer.Store, root 
 			drain()
 			fmt.Fprint(w, "\n")
 			fmt.Fprintf(w, "\x1b[1;38;5;82m✔ Stopped continuous indexing\x1b[0m \x1b[38;5;246m(%d pass(es), %d file(s) updated)\x1b[0m\n", passes, updated)
+			if unwatched > 0 {
+				fmt.Fprintf(w, "\x1b[38;5;214m! %d director(ies) could not be watched and were not tracked.\x1b[0m\n", unwatched)
+			}
 			return nil
 
 		case event, ok := <-fsw.Events:
@@ -157,7 +165,15 @@ func runIndexWatch(ctx context.Context, w io.Writer, store *indexer.Store, root 
 			// against the original watch root, exactly as the indexer walk does.
 			if event.Has(fsnotify.Create) {
 				if st, serr := os.Stat(event.Name); serr == nil && st.IsDir() {
-					if err := addWatchDirs(fsw, store, root, event.Name, except); err == nil {
+					// Registering a watch can fail, most often because the
+					// platform ran out of watch descriptors — Linux caps inotify
+					// watches well below what a deep tree needs. A directory CHEST
+					// cannot watch is one it silently stops tracking forever, so
+					// the failure is reported instead of discarded.
+					if werr := addWatchDirs(fsw, store, root, event.Name, except); werr != nil {
+						unwatched++
+						fmt.Fprintf(w, "\x1b[38;5;214m! not watching %s: %v\x1b[0m\n", event.Name, werr)
+					} else {
 						schedule()
 					}
 					continue

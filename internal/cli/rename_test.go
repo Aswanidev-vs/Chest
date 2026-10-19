@@ -171,6 +171,45 @@ func TestRenameAppliesAndUndoRestoresOriginalNames(t *testing.T) {
 // TestRenameCollisionAutoRenamesSecondFile covers two names in the same folder
 // collapsing onto one target: the second walks the "name (1).ext" chain and
 // the first is never overwritten.
+// TestRenameCaseOnlyChangeIsReportedNotSwallowed covers a template that produces
+// a name differing from the current one only by case. On a case-insensitive
+// filesystem that rename is a no-op, so nothing may move — but the file did
+// match, so the command must not claim "no files matched".
+func TestRenameCaseOnlyChangeIsReportedNotSwallowed(t *testing.T) {
+	root := t.TempDir()
+	original := filepath.Join(root, "Photo.jpg")
+	writeRenameFixture(t, original, "case bytes")
+
+	// Reasons are diagnostics and go to stderr, so capture both streams: the
+	// claim under test spans them.
+	oldErr := os.Stderr
+	er, ew, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create stderr pipe: %v", err)
+	}
+	os.Stderr = ew
+
+	output, runErr := runRename(t, root, "--to", "photo.{ext}", "--yes")
+
+	ew.Close()
+	os.Stderr = oldErr
+	stderr, _ := io.ReadAll(er)
+
+	if runErr != nil {
+		t.Fatalf("rename error = %v", runErr)
+	}
+
+	if got := readRenameFixture(t, original); got != "case bytes" {
+		t.Errorf("content changed unexpectedly = %q", got)
+	}
+	if strings.Contains(output, "No files matched for renaming.") {
+		t.Errorf("a file that matched was reported as unmatched; output:\n%s", output)
+	}
+	if !strings.Contains(string(stderr), "differs from the template only by case") {
+		t.Errorf("case-only skip was not explained; stderr:\n%s", stderr)
+	}
+}
+
 func TestRenameCollisionAutoRenamesSecondFile(t *testing.T) {
 	root := t.TempDir()
 	keep := filepath.Join(root, "IMG_0001.jpg")
