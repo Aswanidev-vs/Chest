@@ -82,10 +82,14 @@ const treeBarWidth = 10
 
 func newTreeCmd() *cobra.Command {
 	var (
-		depth   int
-		sortBy  string
-		exclude []string
-		jsonOut bool
+		depth       int
+		sortBy      string
+		jsonOut     bool
+		exclude     []string
+		implicitAdd []string
+		explicitAdd []string
+		removeNames []string
+		events      []treeFlagEvent
 	)
 
 	cmd := &cobra.Command{
@@ -103,13 +107,26 @@ file metadata only. No file is opened and no content is read, so the cost is
 one stat per entry rather than one read per byte.
 
 Directories below --depth are left unread. They are counted and the total says
-so — a truncated sum is never presented as a whole one.`,
+so — a truncated sum is never presented as a whole one.
+
+Names for --exclude, --implicit, --explicit and --remove may be written
+comma-separated, repeated, or simply listed after the flag; keep the directory
+argument first. .git is skipped without being asked — it is on the implicit list.
+
+--exclude applies to this run only. --implicit and --explicit are saved to
+~/.chest/tree_flags.toml and hold from then on: implicit names are skipped,
+explicit names are drawn even when they are implicit or excluded. --remove
+takes names back off either saved list.`,
 		Example: `  chest tree
   chest tree ~/Downloads --depth 1
   chest tree . --sort name --depth 2
   chest tree /var/log --json > tree.json
-  chest tree . -x node_modules,.git`,
-		Args: cobra.MaximumNArgs(1),
+  chest tree . -x node_modules,.git
+  chest tree ./ --exclude node_modules .mimocode .testing
+  chest tree ./ --implicit node_modules          # saved: skipped from now on
+  chest tree ./ --explicit node_modules          # drawn even when implicit
+  chest tree ./ --remove node_modules            # drop it from the saved lists`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if depth < 0 {
 				return errors.New("--depth must be zero or greater")
@@ -117,9 +134,14 @@ so — a truncated sum is never presented as a whole one.`,
 			if sortBy != "size" && sortBy != "name" {
 				return fmt.Errorf("--sort must be size or name, got %q", sortBy)
 			}
-			root := "."
-			if len(args) > 0 {
-				root = args[0]
+			root, err := resolveTreeArgs(args, events, map[string]*[]string{
+				"exclude":  &exclude,
+				"implicit": &implicitAdd,
+				"explicit": &explicitAdd,
+				"remove":   &removeNames,
+			})
+			if err != nil {
+				return err
 			}
 			abs, err := filepath.Abs(filepath.Clean(root))
 			if err != nil {
@@ -133,7 +155,33 @@ so — a truncated sum is never presented as a whole one.`,
 				return fmt.Errorf("%s is not a directory", abs)
 			}
 
-			report, err := buildTree(abs, depth, sortBy, exclude)
+			stored, err := loadTreeFlags()
+			if err != nil {
+				return err
+			}
+			// Adds first, removes second: `--implicit x --remove x` resolves
+			// to x being gone, the order the two flags were written in.
+			effective := treeFlags{
+				Implicit: append([]string{}, stored.Implicit...),
+				Explicit: append([]string{}, stored.Explicit...),
+			}
+			effective.Implicit = addTreeFlag(effective.Implicit, implicitAdd)
+			effective.Explicit = addTreeFlag(effective.Explicit, explicitAdd)
+			effective.Implicit = removeTreeFlag(effective.Implicit, removeNames)
+			effective.Explicit = removeTreeFlag(effective.Explicit, removeNames)
+
+			var savedTo string
+			if !treeFlagsEqual(effective, stored) {
+				if savedTo, err = saveTreeFlags(effective); err != nil {
+					return err
+				}
+			}
+
+			// skip = this run's --exclude plus the standing implicit list;
+			// show = the standing explicit list, which beats both.
+			report, err := buildTree(abs, depth, sortBy,
+				manifest.NewExcluder(exclude, effective.Implicit),
+				manifest.NewExcluder(effective.Explicit))
 			if err != nil {
 				return err
 			}
@@ -142,24 +190,37 @@ so — a truncated sum is never presented as a whole one.`,
 				return emitReport(cmd.OutOrStdout(), report, nil, true, false, "")
 			}
 			printTree(cmd.OutOrStdout(), report)
+			if savedTo != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  \x1b[38;5;246m· tree flags saved to %s (%d implicit, %d explicit)\x1b[0m\n\n",
+					savedTo, len(effective.Implicit), len(effective.Explicit))
+			}
 			return nil
 		},
 	}
 
-	cmd.Flags().IntVar(&depth, "depth", 3, "How many directory levels to expand (0 = the root only)")
-	cmd.Flags().StringVar(&sortBy, "sort", "size", "Order siblings by size or name")
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output the tree as JSON instead of the drawn tree")
-	cmd.Flags().StringSliceVarP(&exclude, "exclude", "x", nil,
-		"Comma-separated directories/files to skip, e.g. node_modules,venv,.git (glob patterns allowed)")
+	fs := cmd.Flags()
+	fs.IntVar(&depth, "depth", 3, "How many directory levels to expand (0 = the root only)")
+	fs.StringVar(&sortBy, "sort", "size", "Order siblings by size or name")
+	fs.BoolVar(&jsonOut, "json", false, "Output the tree as JSON instead of the drawn tree")
+	fs.VarP(&treeListFlag{name: "exclude", dst: &exclude, events: &events, fs: fs}, "exclude", "x",
+		"Names to skip this run: comma-separated, repeated, or listed after the flag (globs allowed)")
+	fs.VarP(&treeListFlag{name: "implicit", dst: &implicitAdd, events: &events, fs: fs}, "implicit", "",
+		"Add names to the saved implicit skip list (~/.chest/tree_flags.toml); skipped from now on")
+	fs.VarP(&treeListFlag{name: "explicit", dst: &explicitAdd, events: &events, fs: fs}, "explicit", "",
+		"Add names to the saved explicit show list; drawn even when implicit or excluded")
+	fs.VarP(&treeListFlag{name: "remove", dst: &removeNames, events: &events, fs: fs}, "remove", "",
+		"Remove names from the saved implicit and explicit lists")
 	return cmd
 }
 
 // buildTree reads the directory listings under root and returns the report.
-// It opens no file for reading: entries come from ReadDir and Info.
-func buildTree(root string, depth int, sortBy string, exclude []string) (*treeReport, error) {
-	excl := manifest.NewExcluder(exclude)
+// It opens no file for reading: entries come from ReadDir and Info. skip holds
+// every rule that hides an entry — this run's --exclude plus the standing
+// implicit list; show holds the standing explicit names, which win over any
+// skip.
+func buildTree(root string, depth int, sortBy string, skip, show *manifest.Excluder) (*treeReport, error) {
 	rep := &treeReport{Root: root, Depth: depth, Sort: sortBy}
-	rep.Node = scanTreeNode(root, 0, depth, sortBy, excl, rep)
+	rep.Node = scanTreeNode(root, 0, depth, sortBy, skip, show, rep)
 	rep.TotalBytes = rep.Node.Size
 	switch {
 	case rep.NotExpandedDirs == 1:
@@ -175,7 +236,7 @@ func buildTree(root string, depth int, sortBy string, exclude []string) (*treeRe
 // subdirectories. Symlinks are read as files, never followed: following one
 // can walk straight back up into the tree being drawn, and a cycle would never
 // terminate.
-func scanTreeNode(path string, level, maxDepth int, sortBy string, excl *manifest.Excluder, rep *treeReport) *treeNode {
+func scanTreeNode(path string, level, maxDepth int, sortBy string, skip, show *manifest.Excluder, rep *treeReport) *treeNode {
 	name := filepath.Base(path)
 	node := &treeNode{Name: name, Path: path, Expanded: true}
 
@@ -194,7 +255,9 @@ func scanTreeNode(path string, level, maxDepth int, sortBy string, excl *manifes
 
 	for _, entry := range entries {
 		rel := treeRel(rep.Root, filepath.Join(path, entry.Name()))
-		if excl.Match(entry.Name(), rel) {
+		// An explicit name is drawn no matter what else matches: that is
+		// the whole promise of --explicit.
+		if !show.Match(entry.Name(), rel) && skip.Match(entry.Name(), rel) {
 			rep.Excluded++
 			continue
 		}
@@ -243,7 +306,7 @@ func scanTreeNode(path string, level, maxDepth int, sortBy string, excl *manifes
 		}
 
 		rep.DirsRead++
-		child := scanTreeNode(childPath, level+1, maxDepth, sortBy, excl, rep)
+		child := scanTreeNode(childPath, level+1, maxDepth, sortBy, skip, show, rep)
 		node.Size += child.Size
 		node.Files += child.Files
 		node.Children = append(node.Children, child)
@@ -304,7 +367,7 @@ func printTree(w io.Writer, rep *treeReport) {
 	fmt.Fprintln(w)
 
 	if rep.Excluded > 0 {
-		fmt.Fprintf(w, "  \x1b[38;5;246m· %d entries excluded by -x/--exclude\x1b[0m\n", rep.Excluded)
+		fmt.Fprintf(w, "  \x1b[38;5;246m· %d entries excluded (implicit + --exclude)\x1b[0m\n", rep.Excluded)
 	}
 	if rep.UnreadableDirs > 0 {
 		fmt.Fprintf(w, "  \x1b[38;5;196m· %d unreadable entries, not counted\x1b[0m\n", rep.UnreadableDirs)

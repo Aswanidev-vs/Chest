@@ -18,6 +18,10 @@ import (
 //	empty/       0 bytes
 func treeFixture(t *testing.T) string {
 	t.Helper()
+	// The tree command reads — and with --implicit writes — ~/.chest/
+	// tree_flags.toml; point it at a scratch home so no fixture run touches
+	// the developer's saved lists or inherits them.
+	hermeticHome(t)
 	root := t.TempDir()
 	files := map[string]int{
 		"a.txt":             5,
@@ -340,7 +344,7 @@ func TestTreeFlagValidation(t *testing.T) {
 
 func TestTreeFlagsRegistered(t *testing.T) {
 	cmd := newTreeCmd()
-	for _, name := range []string{"depth", "sort", "json", "exclude"} {
+	for _, name := range []string{"depth", "sort", "json", "exclude", "implicit", "explicit", "remove"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("tree is missing --%s", name)
 		}
@@ -392,5 +396,254 @@ func TestTreeSizeKeyIsDescending(t *testing.T) {
 	a2 := &treeNode{Name: "b", Size: 5}
 	if treeKey(a1, "size") >= treeKey(a2, "size") {
 		t.Fatalf("equal sizes do not break the tie by name: %q vs %q", treeKey(a1, "size"), treeKey(a2, "size"))
+	}
+}
+
+// --exclude takes a whole run of names after the flag, as documented, and the
+// older comma form keeps working beside it.
+func TestTreeExcludeTakesMultipleSpaceSeparatedNames(t *testing.T) {
+	root := treeFixture(t)
+
+	rep := treeJSON(t, root, "--depth", "3", "--exclude", "big.bin", "skipme", "a.txt")
+	for _, name := range []string{"big.bin", "skipme", "a.txt"} {
+		if findNodeQuiet(rep.Node, name) != nil {
+			t.Errorf("--exclude did not drop %q", name)
+		}
+	}
+	if rep.Excluded != 3 {
+		t.Errorf("Excluded = %d, want 3", rep.Excluded)
+	}
+	if rep.TotalBytes != 30 {
+		t.Errorf("total = %d, want 30 (136 minus big.bin, skipme and a.txt)", rep.TotalBytes)
+	}
+
+	comma := treeJSON(t, root, "--depth", "3", "-x", "big.bin,skipme")
+	if comma.Excluded != 2 {
+		t.Errorf("-x a,b excluded %d entries, want 2", comma.Excluded)
+	}
+}
+
+// .git is on the implicit list out of the box — nobody has to type it — and
+// --explicit puts a named entry back on the drawing even so.
+func TestTreeGitIsImplicitlyExcludedAndExplicitlyShown(t *testing.T) {
+	root := treeFixture(t)
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), make([]byte, 8), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep := treeJSON(t, root, "--depth", "3")
+	if findNodeQuiet(rep.Node, ".git") != nil {
+		t.Error(".git must be excluded without being named as an argument")
+	}
+	if rep.Excluded != 1 {
+		t.Errorf("Excluded = %d, want 1", rep.Excluded)
+	}
+	if rep.TotalBytes != 136 {
+		t.Errorf("total = %d, want 136 (the .git file is not counted)", rep.TotalBytes)
+	}
+
+	shown := treeJSON(t, root, "--depth", "3", "--explicit", ".git")
+	if findNodeQuiet(shown.Node, ".git") == nil {
+		t.Error("--explicit did not draw an implicitly excluded name")
+	}
+	if shown.TotalBytes != 144 {
+		t.Errorf("total = %d, want 144 (.git back in the sum)", shown.TotalBytes)
+	}
+	if shown.Excluded != 0 {
+		t.Errorf("Excluded = %d, want 0", shown.Excluded)
+	}
+}
+
+// --implicit saves the name where the next run will find it, skips it right
+// away, and says that it wrote the file.
+func TestTreeImplicitIsSavedAndAppliesToTheNextRun(t *testing.T) {
+	root := treeFixture(t)
+
+	out, _, err := cliRun(t, newTreeCmd(), root, "--implicit", "skipme")
+	if err != nil {
+		t.Fatalf("chest tree --implicit: %v", err)
+	}
+	if strings.Contains(out, "skipme") {
+		t.Errorf("--implicit should skip the name it just saved:\n%s", out)
+	}
+	if !strings.Contains(out, "saved") {
+		t.Errorf("a run that changed the saved lists must say so:\n%s", out)
+	}
+
+	path, err := treeFlagsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("saved lists not written: %v", err)
+	}
+	for _, want := range []string{"skipme", ".git"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("saved lists are missing %q:\n%s", want, data)
+		}
+	}
+
+	// The next run, with no flags at all, still skips it.
+	rep := treeJSON(t, root, "--depth", "3")
+	if findNodeQuiet(rep.Node, "skipme") != nil {
+		t.Error("--implicit must hold for the next run without the flag")
+	}
+	if rep.TotalBytes != 135 {
+		t.Errorf("total = %d, want 135", rep.TotalBytes)
+	}
+}
+
+// --explicit is saved the same way --implicit is, and wins over it both on
+// the run that sets it and on every run after.
+func TestTreeExplicitIsSavedAndBeatsImplicit(t *testing.T) {
+	root := treeFixture(t)
+	if _, _, err := cliRun(t, newTreeCmd(), root, "--implicit", "skipme"); err != nil {
+		t.Fatalf("chest tree --implicit: %v", err)
+	}
+
+	shown := treeJSON(t, root, "--depth", "3", "--explicit", "skipme")
+	if findNodeQuiet(shown.Node, "skipme") == nil {
+		t.Error("--explicit did not show a name that was implicit")
+	}
+
+	rep := treeJSON(t, root, "--depth", "3")
+	if findNodeQuiet(rep.Node, "skipme") == nil {
+		t.Error("--explicit must persist into later runs")
+	}
+}
+
+// --remove takes a name off either saved list, effective on the same run and
+// on every run after, and leaves the rest of the list — the .git default —
+// untouched.
+func TestTreeRemoveTakesNamesOffTheSavedLists(t *testing.T) {
+	root := treeFixture(t)
+	if _, _, err := cliRun(t, newTreeCmd(), root, "--implicit", "skipme"); err != nil {
+		t.Fatalf("chest tree --implicit: %v", err)
+	}
+
+	rep := treeJSON(t, root, "--depth", "3", "--remove", "skipme")
+	if findNodeQuiet(rep.Node, "skipme") == nil {
+		t.Error("--remove must take effect on the run that removes it")
+	}
+
+	path, err := treeFlagsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("saved lists unreadable after --remove: %v", err)
+	}
+	if strings.Contains(string(data), "skipme") {
+		t.Errorf("removed name is still on disk:\n%s", data)
+	}
+	if !strings.Contains(string(data), ".git") {
+		t.Errorf("--remove must not take the .git default off:\n%s", data)
+	}
+
+	// With the name off the list it is an ordinary folder again; the file
+	// check above already proves it is not being re-added behind the scenes.
+	again := treeJSON(t, root, "--depth", "3")
+	if findNodeQuiet(again.Node, "skipme") == nil {
+		t.Error("a removed name is still hidden on the next run")
+	}
+}
+
+// The built-in .git rule is an ordinary entry on the implicit list, so
+// --remove can take it off too.
+func TestTreeRemoveCanDropTheGitDefault(t *testing.T) {
+	root := treeFixture(t)
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), make([]byte, 8), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plain := treeJSON(t, root, "--depth", "3")
+	if findNodeQuiet(plain.Node, ".git") != nil {
+		t.Fatal(".git should start excluded")
+	}
+
+	removed := treeJSON(t, root, "--depth", "3", "--remove", ".git")
+	if findNodeQuiet(removed.Node, ".git") == nil {
+		t.Error("--remove .git did not take effect")
+	}
+	again := treeJSON(t, root, "--depth", "3")
+	if findNodeQuiet(again.Node, ".git") == nil {
+		t.Error("the removed .git default came back on the next run")
+	}
+}
+
+// Trailing names attach to the flag they were written after, not to whichever
+// list flag happened to be parsed last overall.
+func TestTreeTrailingNamesAttachToTheFlagTheyFollow(t *testing.T) {
+	root := treeFixture(t)
+
+	rep := treeJSON(t, root, "--depth", "3", "--exclude", "big.bin", "--implicit", "skipme", "a.txt")
+	if rep.TotalBytes != 30 {
+		t.Errorf("total = %d, want 30 (big.bin, skipme and a.txt all skipped)", rep.TotalBytes)
+	}
+
+	path, err := treeFlagsPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("saved lists not written: %v", err)
+	}
+	if strings.Contains(string(data), "big.bin") {
+		t.Errorf("--exclude leaked into the saved lists:\n%s", data)
+	}
+	for _, want := range []string{"skipme", "a.txt"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("trailing name %q was not attached to --implicit:\n%s", want, data)
+		}
+	}
+}
+
+// A lone bare argument after a list flag is still the directory, the shape
+// `chest tree -x <names> <path>` has always accepted.
+func TestTreeDirectoryMayFollowListFlags(t *testing.T) {
+	root := treeFixture(t)
+
+	stdout, stderr, err := cliRun(t, newTreeCmd(), "--json", "--exclude", "skipme", root)
+	if err != nil {
+		t.Fatalf("chest tree --exclude skipme <path>: %v\n%s", err, stderr)
+	}
+	var rep treeReport
+	if err := json.Unmarshal([]byte(stdout), &rep); err != nil {
+		t.Fatalf("--json output does not parse: %v\n%s", err, stdout)
+	}
+	if rep.Root != root {
+		t.Errorf("Root = %q, want %q (the trailing argument is the directory)", rep.Root, root)
+	}
+	if findNodeQuiet(rep.Node, "skipme") != nil {
+		t.Error("--exclude did not drop skipme")
+	}
+	if rep.TotalBytes != 135 {
+		t.Errorf("total = %d, want 135", rep.TotalBytes)
+	}
+}
+
+// The path is the only positional argument there is; a second one has nowhere
+// to go, and the error says where the names belong instead.
+func TestTreeRejectsStrayArguments(t *testing.T) {
+	root := treeFixture(t)
+
+	_, _, err := cliRun(t, newTreeCmd(), root, "stray")
+	if err == nil {
+		t.Fatal("a second positional argument must be rejected")
+	}
+	if !strings.Contains(err.Error(), "stray") {
+		t.Errorf("error does not name the stray argument: %v", err)
+	}
+	if !strings.Contains(err.Error(), "--exclude") {
+		t.Errorf("error should point at the flags that take names: %v", err)
 	}
 }
