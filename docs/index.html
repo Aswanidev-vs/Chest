@@ -41,11 +41,6 @@
   <!-- Hero Section -->
   <header class="hero" id="overview">
     <div class="container">
-      <div class="hero-pill">
-        <i data-lucide="shield-check"></i>
-        <span>100% Local • Zero Telemetry • Reversible Actions</span>
-      </div>
-
       <h1 class="hero-title">
         Autonomous file organization for the <span class="gradient-text">modern terminal.</span>
       </h1>
@@ -134,6 +129,23 @@
         <pre class="terminal-content" id="term-demo-body"><span class="term-ln"><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-cmd">sort</span> <span class="t-path">~/Downloads</span> <span class="t-flag">-p</span> downloads <span class="t-flag">--dry-run</span></span><span class="term-ln"></span><span class="term-ln"><span class="t-key">CHEST PLAN</span>  <span class="t-dim"># 3 moves, 0 collisions detected</span></span><span class="term-ln">  <span class="t-cmd">anime_ep01.mkv</span>      <span class="t-arrow">→</span>  <span class="t-path">Downloads/Videos/</span></span><span class="term-ln">  <span class="t-cmd">profile_shot.png</span>    <span class="t-arrow">→</span>  <span class="t-path">Downloads/Images/</span></span><span class="term-ln">  <span class="t-cmd">q3_financials.pdf</span>   <span class="t-arrow">→</span>  <span class="t-path">Downloads/Documents/</span></span><span class="term-ln"></span><span class="term-ln"><span class="t-warn">3 files prepared to move. No changes made (dry run).</span></span><span class="term-ln"><span class="t-dim">Run with -y or omit --dry-run to apply.</span></span></pre>
       </div>
 
+    </div>
+    <div class="hero-constellation" aria-hidden="true">
+      <svg class="constellation constellation-left" viewBox="0 0 180 180">
+        <path d="M18 104c33-55 75-70 143-34" class="constellation-path"></path>
+        <path d="M28 124c38-28 76-29 124-6" class="constellation-path constellation-path-dim"></path>
+        <circle cx="42" cy="87" r="5" class="constellation-node"></circle>
+        <circle cx="101" cy="62" r="4" class="constellation-node constellation-node-small"></circle>
+        <circle cx="145" cy="72" r="6" class="constellation-node"></circle>
+        <path d="M42 87 101 62l44 10" class="constellation-link"></path>
+      </svg>
+      <svg class="constellation constellation-right" viewBox="0 0 220 160">
+        <rect x="42" y="36" width="104" height="72" rx="8" class="constellation-frame"></rect>
+        <path d="M63 61h52M63 79h34" class="constellation-link"></path>
+        <path d="m155 44 28 18v44l-28 16" class="constellation-path"></path>
+        <circle cx="63" cy="61" r="3" class="constellation-node"></circle>
+        <circle cx="97" cy="79" r="3" class="constellation-node"></circle>
+      </svg>
     </div>
   </header>
 
