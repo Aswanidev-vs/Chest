@@ -374,7 +374,7 @@ func TestPlanRenamePolicyResolvesAgainstDiskAndPlanClaims(t *testing.T) {
 	}
 }
 
-func TestPlanOnDiskCollisionUnderDefaultPolicySkips(t *testing.T) {
+func TestPlanOnDiskCollisionUnderDefaultPolicyRenames(t *testing.T) {
 	root := t.TempDir()
 	writeSourceFile(t, filepath.Join(root, "Images", "photo.jpg"), "existing")
 	files := twoSameNamedFiles(t, root, "photo.jpg")
@@ -385,14 +385,19 @@ func TestPlanOnDiskCollisionUnderDefaultPolicySkips(t *testing.T) {
 		t.Fatalf("Plan() error = %v", err)
 	}
 
-	if len(plan.Operations) != 0 {
-		t.Fatalf("expected no operations, got %d", len(plan.Operations))
+	if len(plan.Operations) != 2 {
+		t.Fatalf("expected both source files to be renamed, got %d operations", len(plan.Operations))
 	}
-	if plan.SkippedFiles != 2 {
-		t.Fatalf("SkippedFiles = %d, want 2", plan.SkippedFiles)
+	if plan.SkippedFiles != 0 {
+		t.Fatalf("SkippedFiles = %d, want 0", plan.SkippedFiles)
 	}
-	if len(plan.Conflicts) != 0 {
-		t.Errorf("on-disk-only collisions should not be recorded as plan conflicts, got %d", len(plan.Conflicts))
+	wantFirst := filepath.Join(root, "Images", "photo (1).jpg")
+	wantSecond := filepath.Join(root, "Images", "photo (2).jpg")
+	if plan.Operations[0].Destination != wantFirst || plan.Operations[1].Destination != wantSecond {
+		t.Errorf("destinations = [%s, %s], want [%s, %s]", plan.Operations[0].Destination, plan.Operations[1].Destination, wantFirst, wantSecond)
+	}
+	if len(plan.Conflicts) != 2 {
+		t.Fatalf("expected two recorded collisions, got %d", len(plan.Conflicts))
 	}
 }
 

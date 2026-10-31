@@ -45,6 +45,7 @@ type sortFlags struct {
 	collision       string
 	allowSystem     bool
 	hashCollisions  bool
+	keepIdentical   bool
 }
 
 func newSortCmd() *cobra.Command {
@@ -249,6 +250,9 @@ func newSortCmd() *cobra.Command {
 			if f.hashCollisions {
 				planOpts = append(planOpts, planner.WithHashCollisions())
 			}
+			if f.keepIdentical {
+				planOpts = append(planOpts, planner.WithKeepIdentical())
+			}
 
 			var pl *planner.Planner
 			if flat {
@@ -380,7 +384,8 @@ func newSortCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&f.customRules, "rule", nil, "Custom rule e.g. 'type=video && size>1GB -> Videos/Large'")
 	cmd.Flags().BoolVar(&f.followSymlinks, "follow-symlinks", false, "Follow symbolic links")
 	cmd.Flags().StringVar(&f.collision, "collision", "", "Collision policy: skip, rename, replace, abort (default: auto-rename on conflicts)")
-	cmd.Flags().BoolVar(&f.hashCollisions, "hash-collisions", false, "When two files resolve to the same destination, compare their content: identical files are duplicates and the second is left in place, different files are still auto-renamed")
+	cmd.Flags().BoolVar(&f.hashCollisions, "hash-collisions", false, "Hash only destination collisions: identical content is skipped by default, different content gets a numbered name; use --keep-identical to retain identical copies")
+	cmd.Flags().BoolVar(&f.keepIdentical, "keep-identical", false, "With --hash-collisions, also move/rename identical-content collisions instead of leaving duplicates in place")
 	cmd.Flags().BoolVar(&f.allowSystem, "allow-system", false, "Allow modifications in protected OS or system directories")
 
 	return cmd

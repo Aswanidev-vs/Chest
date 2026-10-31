@@ -4,7 +4,7 @@
    Zero emojis — Pure Lucide SVG Icons
    ======================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600&family=Bricolage+Grotesque:wght@400;500;600;700;800&display=swap');
 
 :root {
   /* Color Palette: Deep Space & Obsidian */
@@ -1176,6 +1176,8 @@ code, .cmd-tag { font-family: var(--font-code); color: var(--teal); }
 .command-choice { width: 100%; min-height: 62px; display: flex; align-items: center; gap: 12px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; color: var(--paper-dim); padding: 10px; cursor: pointer; transition: background-color .25s ease, color .25s ease, border-color .25s ease, transform .25s ease; }
 .command-choice:hover { color: var(--paper); transform: translateX(3px); }
 .command-choice.is-active { color: var(--paper); background: rgba(199, 168, 107, .09); border-color: rgba(199, 168, 107, .26); }
+.command-choice-featured { border-color: rgba(104, 196, 174, .2); }
+.command-choice-featured > svg, .command-choice-featured small { color: var(--teal); }
 .command-choice > svg { width: 18px; color: var(--brass); }
 .command-choice span { display: grid; gap: 4px; }
 .command-choice strong { font: 600 .88rem var(--font-code); }
@@ -1240,3 +1242,100 @@ code, .cmd-tag { font-family: var(--font-code); color: var(--teal); }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Blueprint Signal theme: a deliberate shift from the former green/brass
+   workshop palette to navy drafting ink, paper text, and measured blue signals. */
+:root {
+  --bg-primary: #101724;
+  --bg-secondary: #162235;
+  --bg-tertiary: #1d2b42;
+  --bg-elevated: #263a58;
+  --bg-card: rgba(22, 34, 53, .86);
+  --bg-card-hover: rgba(30, 46, 72, .94);
+  --glass-border: rgba(191, 211, 235, .14);
+  --glass-border-hover: rgba(126, 180, 255, .48);
+  --glass-border-focus: rgba(240, 198, 116, .58);
+  --text-primary: #edf3f9;
+  --text-secondary: #aab8ca;
+  --text-muted: #7c8ba0;
+  --text-dim: #586b84;
+  --accent-emerald: #7eb5ff;
+  --accent-emerald-glow: rgba(126, 181, 255, .22);
+  --accent-emerald-subtle: rgba(126, 181, 255, .12);
+  --accent-cyan: #a8d0ff;
+  --accent-cyan-glow: rgba(168, 208, 255, .2);
+  --accent-blue: #6f9fff;
+  --accent-violet: #b5a8ff;
+  --accent-amber: #f0c674;
+  --accent-rose: #ff967e;
+  --term-bg: #0a111d;
+  --term-header: #111c2e;
+  --term-border: rgba(191, 211, 235, .15);
+  --term-cmd: #dceaff;
+  --term-path: #a8d0ff;
+  --term-flag: #f0c674;
+  --term-dim: #687c97;
+  --term-ok: #7eb5ff;
+  --term-warn: #ff967e;
+  --term-err: #ff776d;
+  --font-sans: 'Bricolage Grotesque', 'Segoe UI', sans-serif;
+  --font-mono: 'Azeret Mono', 'Cascadia Code', monospace;
+  --font-ui: 'Bricolage Grotesque', 'Segoe UI', sans-serif;
+  --font-code: 'Azeret Mono', 'Cascadia Code', monospace;
+  --ink: #101724;
+  --panel: #162235;
+  --panel-raised: #1d2b42;
+  --paper: #edf3f9;
+  --paper-dim: #aab8ca;
+  --brass: #f0c674;
+  --teal: #7eb5ff;
+  --warning: #ff967e;
+  --line: rgba(191, 211, 235, .14);
+  --line-strong: rgba(126, 181, 255, .38);
+}
+
+body { background-color: var(--bg-primary); color: var(--text-primary); }
+body::before { background: linear-gradient(135deg, rgba(126, 181, 255, .06), transparent 36%); filter: none; }
+body::after { background: linear-gradient(315deg, rgba(240, 198, 116, .04), transparent 32%); filter: none; }
+.ambient-grid { background-image: linear-gradient(to right, rgba(168, 208, 255, .035) 1px, transparent 1px), linear-gradient(to bottom, rgba(168, 208, 255, .035) 1px, transparent 1px); background-size: 64px 64px; }
+.navbar { background: rgba(16, 23, 36, .9); border-color: var(--glass-border); }
+.brand-logo-img { filter: drop-shadow(0 0 18px rgba(126, 181, 255, .22)); }
+.brand-tag { background: rgba(240, 198, 116, .1); color: var(--accent-amber); border-color: rgba(240, 198, 116, .3); }
+.nav-link:hover { background: rgba(126, 181, 255, .08); }
+.nav-link.active { color: var(--accent-blue); background: var(--accent-emerald-subtle); }
+.nav-cta { background: var(--accent-amber); box-shadow: 0 8px 28px rgba(240, 198, 116, .12); }
+.nav-cta:hover { background: #f6d895; box-shadow: 0 10px 30px rgba(240, 198, 116, .2); }
+.hero-pill, .section-tag { background: rgba(126, 181, 255, .08); border-color: rgba(126, 181, 255, .3); color: var(--accent-blue); }
+.gradient-text { color: var(--accent-amber); }
+.button-primary { background: var(--accent-amber); border-color: var(--accent-amber); }
+.button-primary:hover, .run-button:hover { background: #f6d895; }
+.button-quiet:hover { border-color: var(--line-strong); background: rgba(126, 181, 255, .08); }
+.install-container, .terminal-window, .feature-card, .cmd-card { background: var(--bg-card); border-color: var(--glass-border); }
+.install-tab-btn.active { color: var(--accent-amber); border-color: var(--accent-amber); background: rgba(240, 198, 116, .08); }
+.terminal-window { animation-name: float-panel-blueprint; }
+.terminal-topbar { background: rgba(10, 17, 29, .82); border-bottom-color: var(--term-border); }
+.feature-card:hover, .cmd-card:hover { background: var(--bg-card-hover); border-color: var(--glass-border-hover); }
+.feature-icon-box { color: var(--accent-blue); background: rgba(126, 181, 255, .08); border-color: rgba(126, 181, 255, .24); }
+.feature-icon-box.purple, .feature-icon-box.amber { color: var(--accent-amber); background: rgba(240, 198, 116, .08); border-color: rgba(240, 198, 116, .24); }
+code, .cmd-tag { color: var(--accent-cyan); }
+.footer-link:hover { color: var(--accent-blue); }
+.simulator-seal { color: var(--accent-blue); }
+.simulator-board { background: var(--bg-card); border-color: var(--glass-border); }
+.simulator-sidebar { background: rgba(10, 17, 29, .66); border-color: var(--glass-border); }
+.command-choice.is-active { background: rgba(240, 198, 116, .09); border-color: rgba(240, 198, 116, .3); }
+.command-choice > svg { color: var(--accent-blue); }
+.command-choice-featured { border-color: rgba(126, 181, 255, .26); }
+.command-choice-featured > svg, .command-choice-featured small { color: var(--accent-cyan); }
+.status-dot { background: var(--accent-blue); box-shadow: 0 0 0 4px rgba(126, 181, 255, .1); }
+.command-input-wrap { border-color: var(--line-strong); background: var(--term-bg); }
+.command-prompt { color: var(--accent-blue); }
+.run-button { background: var(--accent-amber); }
+.sim-terminal { background: var(--term-bg); border-color: var(--term-border); }
+.terminal-prompt, .terminal-ok { color: var(--accent-blue); }
+.terminal-key, .terminal-arrow { color: var(--accent-amber); }
+.terminal-path { color: var(--accent-cyan); }
+.terminal-warn { color: var(--accent-rose); }
+.simulator-notes a { color: var(--accent-amber); }
+.simulator-notes svg { color: var(--accent-blue); }
+
+@keyframes float-panel-blueprint { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }

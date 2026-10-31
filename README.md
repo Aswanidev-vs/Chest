@@ -43,7 +43,7 @@ make build
 - **Rule-Based Organization**: Sort by extensions, categories, file size boundaries, and date. `--date` defaults to modification-year folders, while `--date-source auto` can use embedded photo/video dates when available; finer granularities name their month folders (`2025/Jan/`) unless `--month-format number` is passed. `--date-source filename` mines dates from filenames (`IMG_20230115_...`, `WhatsApp Image 2024-05-01...`, `report_20250126.pdf`). Define custom rules on the CLI or use built-in presets (`downloads`, `media`, `documents`, `developer`, `photos`). Rules persist in `chest.toml` — drop one in a project folder (or `~/.chest/chest.toml` for user-wide defaults) and CHEST picks it up; precedence is flags > `--rule` > project `chest.toml` > user `chest.toml` > preset. Rule conditions can also match embedded metadata: `camera=Canon`, `artist="Daft Punk"`, `codec=h264`, or `meta.<key>=` for anything else the extractors surface. Validate any set with `chest rule check`.
 - **Signature-Based Format Detection & Metadata Extraction**: Every file is inspected by content signature (magic bytes first, extension as fallback) to determine its true format, then enriched with embedded metadata — EXIF `DateTimeOriginal`/`CreateDate`, QuickTime `mvhd` creation time, PDF Info dictionary fields, and ID3 / Vorbis / RIFF-INFO audio tags, plus ZIP-based OOXML / ODF / EPUB core properties. The extractor registry is open, so custom binary formats can be registered programmatically (CHEST ships with a built-in custom-format example: `.gocut` GoCut project files, detected by JSON signature or extension, exposing `format=gocut`, MIME `application/x-gocut-project`, category `video`, and an embedded `createdAt` as the taken date) and then routed with `format=...` rules even when the extension is unknown or renamed.
 - **Safety First**:
-  - Full dry-run preview (`chest sort --dry-run` or `-n`) before files move, including a **CONFLICTS block** whenever two files resolve to the same destination. By default the second file is auto-renamed (`photo (1).jpg`) — case-normalized, so `Photo.jpg` and `photo.jpg` never silently destroy each other; pass `--collision skip` to leave the second file in place instead.
+  - Full dry-run preview (`chest sort --dry-run` or `-n`) before files move, including a **CONFLICTS block** whenever a destination is already occupied or multiple files resolve to it. By default the incoming file is auto-renamed (`photo (1).jpg`) — case-normalized, so `Photo.jpg` and `photo.jpg` never silently destroy each other; pass `--collision skip` to leave the incoming file in place instead.
   - Interactive confirmations.
   - Built-in collision policies: `skip`, `rename`, `replace`, or `abort`.
   - Comprehensive operation logging and rollbacks via `chest undo`. Runs where some files failed are recorded honestly as `Partial`/`Failed` (never `Complete`), `undo` validates the whole batch before moving anything and rolls back cleanly if interrupted.
@@ -75,7 +75,7 @@ make build
 - **Plan Artifacts**: `chest plan --out plan.json` saves the exact plan `sort` would execute **without touching a single file**, so it can be reviewed, committed or diffed. `chest plan apply plan.json` executes it after re-validating every source, refusing the whole batch if anything moved. `chest plan diff a.json b.json` compares two plans.
 - **Checkpoints & Selective Undo**: `chest checkpoint --name before-cleanup` marks a point in history; `chest undo --to before-cleanup` then reverts everything after it as one atomic all-or-nothing batch. `chest undo <id> --file photo.jpg` reverts a single file and leaves the rest of the run undoable. `chest history --prune --keep <n>` bounds the log.
 - **Backup Integrity (`manifest` / `verify`)**: `chest manifest` writes a reproducible SHA-256 inventory of a folder; `chest verify` re-hashes and reports `OK` / `MODIFIED` / `MISSING` / `ADDED`, exiting **4** on any drift so scripts can detect it. Both are read-only and never silently drop files that exceed `--max-size`.
-- **Content-Aware Collision Handling**: `chest sort --hash-collisions` hashes **only the files involved in a collision** — never the whole tree — so a genuine duplicate is skipped while two different files that happened to share a name are both preserved and auto-renamed.
+- **Content-Aware Collision Handling**: `chest sort --format --hash-collisions` hashes **only the files involved in a collision** — never the whole tree. Without `--keep-identical`, byte-identical collisions are treated as duplicates and skipped; different-content collisions are both preserved with names such as `photo (1).jpg` and `photo (2).jpg`. Add `--keep-identical` to retain identical colliding files as well. Across every sort mode, an existing destination is treated as a collision too, so the default safe rename chain prevents an incoming file from being left unorganized.
 - **Near-Duplicate Image Detection**: `chest duplicates --similar` groups images that *look* alike using a perceptual hash (DCT-based, no external dependency), reported separately from exact SHA-256 matches, with a `--threshold` Hamming tolerance.
 - **Batch Rename**: `chest rename --to "{year}-{month}-{day}.{ext}"` normalizes messy filenames in place using the same date machinery as `sort`, with dry-run, collision policy, history and full `undo`. It never moves a file between folders.
 - **Health & Inspection**: `chest doctor` is a single read-only check over index freshness, un-undoable history entries, unreadable directories, broken symlinks, schedules and rule validity. `chest tree` draws a folder as a box-drawing tree with rolled-up sizes.
@@ -89,7 +89,7 @@ make build
 
 | Command | Description | Example |
 |---|---|---|
-| `chest sort` | Sort files using presets, flags, or custom rules; `--date` groups by modification year by default, or embedded media date with `--date-source auto`, or filename dates with `--date-source filename`; `--date-granularity month|day` groups into named month folders (`2025/Jan/`), or `2025/01/` with `--month-format number`; `--format`/`format=` use content-detected format (`--allow-system` for OS dirs); `--hash-collisions` hashes **only the conflicting subset** so an identical copy is skipped and distinct content is auto-renamed instead of clobbered; `--dry-run --json` exports the plan; rules also load from `chest.toml` and match metadata fields | `chest sort ~/Downloads -d --date-granularity month` |
+| `chest sort` | Sort files using presets, flags, or custom rules; `--date` groups by modification year by default, or embedded media date with `--date-source auto`, or filename dates with `--date-source filename`; `--date-granularity month|day` groups into named month folders (`2025/Jan/`), or `2025/01/` with `--month-format number`; `--format`/`format=` use content-detected format (`--allow-system` for OS dirs); `--hash-collisions` hashes **only the conflicting subset**, skipping identical collisions unless `--keep-identical` is passed and assigning `(1)`, `(2)` names to different-content collisions; `--dry-run --json` exports the plan; rules also load from `chest.toml` and match metadata fields | `chest sort ~/Downloads -d --date-granularity month` |
 | `chest search` | Search files by name, metadata, or file content grep; `--csv`/`--out` export and `--save`/`--load` for named saved queries in `~/.chest/searches` | `chest search "report" -e pdf -c "invoice"`, `chest search --save recent-pdfs` |
 | `chest repl` | Interactive rules builder with a live, read-only preview; `preview` re-plans from the current rules and never touches disk, only `apply` moves files (recorded in history, so `chest undo` reverts it). Intra-plan conflicts auto-rename and appear as a CONFLICTS block. Save reusable rule sets to `~/.chest/templates` | `chest repl ~/Downloads -p media` |
 | `chest watch` | Continuously watch and organize incoming files (`--initial` sorts existing files first; `--allow-system` guard) | `chest watch ~/Downloads --preset media --initial` |
@@ -122,6 +122,18 @@ make build
 | `chest version` | Display version and build architecture | `chest version` |
 
 ---
+
+### Collision-aware format sorting
+
+Use `--hash-collisions` with `--format` when files with the same detected format may resolve to the same destination name. CHEST hashes only the files in each collision. Without `--keep-identical`, a byte-identical collision is skipped and the later source file stays in place. Different-content collisions are kept and receive numbered names such as `photo (1).jpg` and `photo (2).jpg`.
+
+```bash
+# Skip byte-identical collisions; keep different content with numbered names.
+chest sort ~/Downloads --format --hash-collisions --dry-run
+
+# Keep byte-identical collisions too, assigning each colliding file a unique name.
+chest sort ~/Downloads --format --hash-collisions --keep-identical
+```
 
 ## Building a Rule Set Interactively (`chest repl`)
 

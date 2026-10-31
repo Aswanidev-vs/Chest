@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="assets/fav.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600&family=Bricolage+Grotesque:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <!-- Lucide Icons CDN -->
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -205,7 +205,7 @@
           </div>
           <h3 class="feature-card-title">Conflict & Collision Guard</h3>
           <p class="feature-card-desc">
-            Two files resolving to the same destination can never destroy each other: the second is auto-renamed (<code>photo (1).jpg</code>), case-normalized across platforms, and every conflict is surfaced in the dry-run CONFLICTS block. Or choose <code>--collision skip</code> explicitly.
+            Two files resolving to the same destination can never destroy each other: the second is auto-renamed (<code>photo (1).jpg</code>), case-normalized across platforms, and every conflict is surfaced in the dry-run CONFLICTS block. Add <code>--hash-collisions</code> to hash only the conflict set; add <code>--keep-identical</code> when byte-identical copies should also be retained as <code>(1)</code> instead of skipped.
           </p>
         </div>
 
@@ -311,9 +311,9 @@
             <span class="cmd-tag">chest sort</span>
             <i data-lucide="arrow-right-left" style="color: var(--text-dim);"></i>
           </div>
-          <p class="cmd-desc">Categorizes target folder by preset, extension, or custom logic expressions with dry-run support. Rules persist in <code>chest.toml</code> (flags > <code>--rule</code> > project > user > preset), can match embedded metadata (<code>camera=</code>, <code>artist=</code>, <code>codec=</code>), and <code>--dry-run --json</code> exports the plan.</p>
+          <p class="cmd-desc">Categorizes target folder by preset, extension, or custom logic expressions with dry-run support. Rules persist in <code>chest.toml</code> (flags > <code>--rule</code> > project > user > preset), can match embedded metadata (<code>camera=</code>, <code>artist=</code>, <code>codec=</code>), and <code>--hash-collisions --keep-identical</code> preserves identical conflict participants under safe <code>(1)</code> names.</p>
           <div class="cmd-snippet">
-            <span>chest sort ~/Downloads -p media</span>
+            <span>chest sort --format --hash-collisions --keep-identical</span>
             <i data-lucide="chevron-right"></i>
           </div>
         </div>

@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="assets/fav.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600&family=Bricolage+Grotesque:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="https://unpkg.com/lucide@latest"></script>
 </head>
@@ -51,6 +51,7 @@
       <aside class="simulator-sidebar">
         <div class="sidebar-label">Choose a rehearsal</div>
         <button class="command-choice is-active" data-command="sort" type="button"><i data-lucide="arrow-right-left"></i><span><strong>sort</strong><small>Preview a safe move plan</small></span></button>
+        <button class="command-choice command-choice-featured" data-command="collision" type="button"><i data-lucide="copy-check"></i><span><strong>collision guard</strong><small>Keep identical as (1)</small></span></button>
         <button class="command-choice" data-command="search" type="button"><i data-lucide="search"></i><span><strong>search</strong><small>Find files by name or text</small></span></button>
         <button class="command-choice" data-command="stats" type="button"><i data-lucide="bar-chart-3"></i><span><strong>stats</strong><small>Read local storage signals</small></span></button>
         <button class="command-choice" data-command="doctor" type="button"><i data-lucide="stethoscope"></i><span><strong>doctor</strong><small>Inspect system health</small></span></button>
@@ -70,7 +71,7 @@
             <input id="command-input" autocomplete="off" spellcheck="false" value="chest sort ~/Downloads --dry-run">
             <button class="run-button" type="submit"><i data-lucide="play"></i> Run rehearsal</button>
           </div>
-          <p class="command-hint">Try changing the path or adding <code>--json</code>. Outputs are sample data.</p>
+          <p class="command-hint">Try changing the path or adding <code>--json</code>, or choose <strong>collision guard</strong> to rehearse <code>--keep-identical</code>. Outputs are sample data.</p>
         </form>
         <div class="output-label"><span>Terminal output</span><span id="output-status">ready</span></div>
         <div class="sim-terminal" id="sim-terminal" role="log" aria-live="polite">

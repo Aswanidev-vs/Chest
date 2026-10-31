@@ -12,6 +12,18 @@
         ['blank'], ['ok', '3 files prepared · 0 collisions · 0 changes made']
       ]
     },
+    collision: {
+      command: 'chest sort --format --hash-collisions --keep-identical',
+      lines: [
+        ['key', 'CHEST PLAN'], ['dim', '# format folders · hash only the conflicting files'], ['blank'],
+        ['path', 'photo.jpg'], ['arrow', '→'], ['value', 'JPG/photo.jpg'],
+        ['path', 'photo-copy.jpg'], ['arrow', '→'], ['value', 'JPG/photo (1).jpg'],
+        ['blank'], ['key', 'CONFLICTS'],
+        ['warn', 'identical content (sha256 match) · duplicate would be skipped by default'],
+        ['ok', 'retained as JPG/photo (1).jpg · --keep-identical'],
+        ['blank'], ['ok', '2 files prepared · 1 identical collision retained · 0 files skipped']
+      ]
+    },
     search: {
       command: 'chest search "revenue growth" --extension pdf',
       lines: [['ok', 'Found 1 match across 1,420 indexed files'], ['blank'], ['key', '[Documents]'], ['path', 'q3_financials.pdf'], ['dim', '2.4 MB · line 42'], ['value', 'Q3 net revenue growth exceeded forecast by +32%']]
@@ -71,8 +83,7 @@
     });
     form.addEventListener('submit', function (event) {
       event.preventDefault();
-      var match = input.value.match(/^\s*chest\s+(\w+)/i);
-      var kind = match && presets[match[1].toLowerCase()] ? match[1].toLowerCase() : 'sort';
+      var kind = getPresetKind(input.value);
       render(kind, input.value.trim() || presets[kind].command);
     });
     document.getElementById('clear-output').addEventListener('click', function () {
@@ -84,5 +95,12 @@
 
   function escapeHTML(value) {
     return value.replace(/[&<>'"]/g, function (character) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]; });
+  }
+
+  function getPresetKind(command) {
+    var normalized = command.toLowerCase();
+    if (normalized.indexOf('--hash-collisions') !== -1 && normalized.indexOf('--keep-identical') !== -1) return 'collision';
+    var match = normalized.match(/^\s*chest\s+(\w+)/);
+    return match && presets[match[1]] ? match[1] : 'sort';
   }
 }());

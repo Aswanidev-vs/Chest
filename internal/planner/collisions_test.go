@@ -111,6 +111,104 @@ func TestPlanHashCollisionsRenamesDistinctContent(t *testing.T) {
 	}
 }
 
+func TestPlanHashCollisionsSkipsIdenticalOnDiskDestination(t *testing.T) {
+	root := t.TempDir()
+	existing := filepath.Join(root, "Images", "photo.jpg")
+	writeSourceFile(t, existing, "identical bytes")
+	source := filepath.Join(root, "incoming", "photo.jpg")
+	writeSourceFile(t, source, "identical bytes")
+	files := []models.File{{Name: "photo.jpg", Path: source, ModTime: time.Now()}}
+
+	plan, err := New(imagesRule(), "", "", WithHashCollisions()).Plan(root, files)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(plan.Operations) != 0 {
+		t.Fatalf("expected the duplicate to stay in place, got %d operation(s)", len(plan.Operations))
+	}
+	if plan.SkippedFiles != 1 {
+		t.Fatalf("SkippedFiles = %d, want 1", plan.SkippedFiles)
+	}
+	if len(plan.Conflicts) != 1 || plan.Conflicts[0].Sources[0] != existing {
+		t.Fatalf("conflicts = %#v, want the on-disk destination as the first source", plan.Conflicts)
+	}
+}
+
+func TestPlanHashCollisionsRenamesDifferentOnDiskDestination(t *testing.T) {
+	root := t.TempDir()
+	writeSourceFile(t, filepath.Join(root, "Images", "photo.jpg"), "existing bytes")
+	source := filepath.Join(root, "incoming", "photo.jpg")
+	writeSourceFile(t, source, "new bytes")
+	files := []models.File{{Name: "photo.jpg", Path: source, ModTime: time.Now()}}
+
+	plan, err := New(imagesRule(), "", "", WithHashCollisions()).Plan(root, files)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(plan.Operations) != 1 {
+		t.Fatalf("expected 1 operation, got %d", len(plan.Operations))
+	}
+	want := filepath.Join(root, "Images", "photo (1).jpg")
+	if plan.Operations[0].Destination != want {
+		t.Errorf("destination = %q, want %q", plan.Operations[0].Destination, want)
+	}
+	if !plan.Operations[0].IsCollision {
+		t.Error("operation should be marked as a collision")
+	}
+	if len(plan.Conflicts) != 1 || plan.Conflicts[0].Sources[0] != filepath.Join(root, "Images", "photo.jpg") {
+		t.Fatalf("conflicts = %#v, want the on-disk destination as the first source", plan.Conflicts)
+	}
+}
+
+func TestPlanHashCollisionsFindsDuplicateBeyondFirstClaim(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "a", "photo.jpg")
+	second := filepath.Join(root, "b", "photo.jpg")
+	third := filepath.Join(root, "c", "photo.jpg")
+	writeSourceFile(t, first, "first bytes")
+	writeSourceFile(t, second, "second bytes")
+	writeSourceFile(t, third, "second bytes")
+	files := []models.File{
+		{Name: "photo.jpg", Path: first, ModTime: time.Now()},
+		{Name: "photo.jpg", Path: second, ModTime: time.Now()},
+		{Name: "photo.jpg", Path: third, ModTime: time.Now()},
+	}
+
+	plan, err := New(imagesRule(), "", "", WithHashCollisions()).Plan(root, files)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(plan.Operations) != 2 {
+		t.Fatalf("expected the distinct pair plus one skipped duplicate, got %d operations", len(plan.Operations))
+	}
+	if plan.Operations[1].Destination != filepath.Join(root, "Images", "photo (1).jpg") {
+		t.Errorf("second destination = %q, want the first numbered variant", plan.Operations[1].Destination)
+	}
+	if plan.SkippedFiles != 1 {
+		t.Errorf("SkippedFiles = %d, want 1", plan.SkippedFiles)
+	}
+}
+
+func TestPlanHashCollisionsKeepIdenticalRenamesDuplicate(t *testing.T) {
+	root := t.TempDir()
+	files := sameNamedPair(t, root, "identical bytes", "identical bytes")
+
+	plan, err := New(imagesRule(), "", "", WithHashCollisions(), WithKeepIdentical()).Plan(root, files)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(plan.Operations) != 2 {
+		t.Fatalf("expected both identical files to be moved, got %d operations", len(plan.Operations))
+	}
+	want := filepath.Join(root, "Images", "photo (1).jpg")
+	if plan.Operations[1].Destination != want {
+		t.Errorf("duplicate destination = %q, want %q", plan.Operations[1].Destination, want)
+	}
+	if plan.SkippedFiles != 0 {
+		t.Errorf("SkippedFiles = %d, want 0", plan.SkippedFiles)
+	}
+}
+
 // Regression guard: without the flag the planner must not consult content at
 // all, so two byte-identical files keep today's auto-rename behavior.
 func TestPlanWithoutHashCollisionsIgnoresContent(t *testing.T) {
