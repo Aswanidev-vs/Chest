@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="assets/fav.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600&family=Bricolage+Grotesque:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <!-- Lucide Icons CDN -->
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -29,6 +29,7 @@
           <a class="nav-link" href="#overview"><i data-lucide="compass"></i> Overview</a>
           <a class="nav-link" href="#features"><i data-lucide="layers"></i> Features</a>
           <a class="nav-link" href="#commands"><i data-lucide="terminal"></i> Commands</a>
+          <a class="nav-link" href="simulator.html"><i data-lucide="play-circle"></i> Try CHEST</a>
           <a class="nav-link" href="documentation.html"><i data-lucide="book-open"></i> Docs</a>
           <a class="nav-link" href="https://github.com/Aswanidev-vs/chest" target="_blank" rel="noreferrer"><i data-lucide="github"></i> GitHub</a>
           <a class="nav-link nav-cta" href="#install"><i data-lucide="download"></i> Get CHEST</a>
@@ -40,11 +41,6 @@
   <!-- Hero Section -->
   <header class="hero" id="overview">
     <div class="container">
-      <div class="hero-pill">
-        <i data-lucide="shield-check"></i>
-        <span>100% Local • Zero Telemetry • Reversible Actions</span>
-      </div>
-
       <h1 class="hero-title">
         Autonomous file organization for the <span class="gradient-text">modern terminal.</span>
       </h1>
@@ -53,6 +49,11 @@
         Point <strong>chest</strong> at cluttered directories and watch them organize into structured compartments.
         Equipped with interactive dry-runs, instant rollbacks, and offline SQLite storage intelligence.
       </p>
+
+      <div class="hero-actions" aria-label="Primary actions">
+        <a class="button button-primary" href="simulator.html"><i data-lucide="play"></i> Rehearse a command</a>
+        <a class="button button-quiet" href="#features"><i data-lucide="arrow-down"></i> See how it works</a>
+      </div>
 
       <!-- Multi-Platform Install Card -->
       <div class="install-container" id="install">
@@ -129,6 +130,23 @@
       </div>
 
     </div>
+    <div class="hero-constellation" aria-hidden="true">
+      <svg class="constellation constellation-left" viewBox="0 0 180 180">
+        <path d="M18 104c33-55 75-70 143-34" class="constellation-path"></path>
+        <path d="M28 124c38-28 76-29 124-6" class="constellation-path constellation-path-dim"></path>
+        <circle cx="42" cy="87" r="5" class="constellation-node"></circle>
+        <circle cx="101" cy="62" r="4" class="constellation-node constellation-node-small"></circle>
+        <circle cx="145" cy="72" r="6" class="constellation-node"></circle>
+        <path d="M42 87 101 62l44 10" class="constellation-link"></path>
+      </svg>
+      <svg class="constellation constellation-right" viewBox="0 0 220 160">
+        <rect x="42" y="36" width="104" height="72" rx="8" class="constellation-frame"></rect>
+        <path d="M63 61h52M63 79h34" class="constellation-link"></path>
+        <path d="m155 44 28 18v44l-28 16" class="constellation-path"></path>
+        <circle cx="63" cy="61" r="3" class="constellation-node"></circle>
+        <circle cx="97" cy="79" r="3" class="constellation-node"></circle>
+      </svg>
+    </div>
   </header>
 
   <!-- Core Features Grid -->
@@ -199,7 +217,7 @@
           </div>
           <h3 class="feature-card-title">Conflict & Collision Guard</h3>
           <p class="feature-card-desc">
-            Two files resolving to the same destination can never destroy each other: the second is auto-renamed (<code>photo (1).jpg</code>), case-normalized across platforms, and every conflict is surfaced in the dry-run CONFLICTS block. Or choose <code>--collision skip</code> explicitly.
+            Two files resolving to the same destination can never destroy each other: the second is auto-renamed (<code>photo (1).jpg</code>), case-normalized across platforms, and every conflict is surfaced in the dry-run CONFLICTS block. Add <code>--hash-collisions</code> to hash only the conflict set; add <code>--keep-identical</code> when byte-identical copies should also be retained as <code>(1)</code> instead of skipped.
           </p>
         </div>
 
@@ -305,9 +323,9 @@
             <span class="cmd-tag">chest sort</span>
             <i data-lucide="arrow-right-left" style="color: var(--text-dim);"></i>
           </div>
-          <p class="cmd-desc">Categorizes target folder by preset, extension, or custom logic expressions with dry-run support. Rules persist in <code>chest.toml</code> (flags > <code>--rule</code> > project > user > preset), can match embedded metadata (<code>camera=</code>, <code>artist=</code>, <code>codec=</code>), and <code>--dry-run --json</code> exports the plan.</p>
+          <p class="cmd-desc">Categorizes target folder by preset, extension, or custom logic expressions with dry-run support. Rules persist in <code>chest.toml</code> (flags > <code>--rule</code> > project > user > preset), can match embedded metadata (<code>camera=</code>, <code>artist=</code>, <code>codec=</code>), and <code>--hash-collisions --keep-identical</code> preserves identical conflict participants under safe <code>(1)</code> names.</p>
           <div class="cmd-snippet">
-            <span>chest sort ~/Downloads -p media</span>
+            <span>chest sort --format --hash-collisions --keep-identical</span>
             <i data-lucide="chevron-right"></i>
           </div>
         </div>

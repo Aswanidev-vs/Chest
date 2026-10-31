@@ -26,7 +26,7 @@ type Planner struct {
 	// explicitPolicy records whether the caller passed a concrete collision
 	// policy. New maps "" to CollisionSkip internally, so the two are
 	// indistinguishable from collisionPolicy alone; the default (auto-rename
-	// on intra-plan conflicts) must only apply to the implicit case.
+	// every occupied destination) must only apply to the implicit case.
 	explicitPolicy  bool
 	dateSource      string
 	dateGranularity string
@@ -39,6 +39,10 @@ type Planner struct {
 	// (--hash-collisions) and off by default; when off, Plan never opens a file
 	// and the produced plan is identical to the pre-flag behavior.
 	hashCollisions bool
+	// keepIdentical disables the duplicate skip performed by hashCollisions.
+	// It is intentionally independent so --keep-identical without
+	// --hash-collisions remains a no-op and preserves the fast path.
+	keepIdentical bool
 }
 
 // Option configures planner behavior without changing the existing constructor signature.
@@ -63,6 +67,16 @@ func WithDate(source, granularity, monthFormat string) Option {
 func WithHashCollisions() Option {
 	return func(p *Planner) {
 		p.hashCollisions = true
+	}
+}
+
+// WithKeepIdentical keeps a file that hashes identically to another member of
+// its destination collision group. It only has an effect together with
+// WithHashCollisions; without content-aware resolution, identical content is
+// not inspected and the existing collision behavior is unchanged.
+func WithKeepIdentical() Option {
+	return func(p *Planner) {
+		p.keepIdentical = true
 	}
 }
 
@@ -304,6 +318,10 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 	// files resolving to the same destination are both planned and the second
 	// move silently overwrites the first at execute time.
 	claimed := make(map[string]string)
+	// collisionSources tracks every source that has already requested a given
+	// destination. A source can be moved to a numbered variant, but it remains
+	// part of the original collision group for duplicate detection.
+	collisionSources := make(map[string][]string)
 	// hasher stays empty unless --hash-collisions is set AND a conflict is
 	// actually found, so the default plan never touches a file.
 	var hasher *contentHasher
@@ -362,29 +380,57 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 
 		if isCollision {
 			// Content-aware resolution is strictly opt-in and only ever looks at
-			// the two files that share this one destination. A genuine duplicate
-			// (identical SHA-256) stays exactly where it is instead of piling up
-			// as "name (1).ext"; distinct content falls through to the normal
-			// per-policy resolution below. The abort policy is left untouched: the
-			// user asked for the whole run to stop on any collision.
-			if p.hashCollisions && claimedInPlan && p.collisionPolicy != models.CollisionAbort {
+			// files that share this destination. A genuine duplicate (identical
+			// SHA-256) stays exactly where it is instead of piling up as
+			// "name (1).ext" unless --keep-identical was requested. The abort
+			// policy is left untouched: the user asked for the whole run to stop
+			// on any collision.
+			if p.hashCollisions && p.collisionPolicy != models.CollisionAbort {
 				if hasher == nil {
 					hasher = newContentHasher()
 				}
-				if hasher.identical(firstClaimer, file.Path) {
+
+				// Include an occupied on-disk target and every earlier source in
+				// this collision group. Comparing only firstClaimer would miss a
+				// later duplicate when the first two files have different content.
+				candidates := collisionSources[filesystem.CaseKey(targetFile)]
+				if onDisk {
+					candidates = append([]string{targetFile}, candidates...)
+				}
+				var identicalTo string
+				for _, candidate := range candidates {
+					if hasher.identical(candidate, file.Path) {
+						identicalTo = candidate
+						break
+					}
+				}
+				if identicalTo != "" && !p.keepIdentical {
 					plan.Conflicts = append(plan.Conflicts, models.PlanConflict{
 						Target:     file.Path,
-						Sources:    []string{firstClaimer, file.Path},
+						Sources:    []string{identicalTo, file.Path},
 						Resolution: "identical content (sha256 match); duplicate left in place",
 					})
+					collisionSources[filesystem.CaseKey(targetFile)] = append(collisionSources[filesystem.CaseKey(targetFile)], file.Path)
 					plan.SkippedFiles++
 					continue
 				}
 			}
 			switch p.collisionPolicy {
 			case models.CollisionSkip:
-				// A file already on disk keeps today's behavior: skip.
-				if !claimedInPlan {
+				// An explicit skip policy leaves the later file in place. The
+				// implicit default is intentionally different: every real collision,
+				// including a destination that already exists on disk, gets a safe
+				// numbered name so sort never silently leaves an unorganized source.
+				if p.explicitPolicy && !claimedInPlan {
+					plan.SkippedFiles++
+					continue
+				}
+				if p.explicitPolicy {
+					plan.Conflicts = append(plan.Conflicts, models.PlanConflict{
+						Target:     file.Path,
+						Sources:    []string{firstClaimer, file.Path},
+						Resolution: "second file left in place under skip policy",
+					})
 					plan.SkippedFiles++
 					continue
 				}
@@ -399,11 +445,15 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 					plan.SkippedFiles++
 					continue
 				}
+				claimant := firstClaimer
+				if claimant == "" {
+					claimant = targetFile
+				}
 				actualTarget, _ = resolveUniqueTarget(targetFile, claimed)
 				action = models.CollisionRename
 				plan.Conflicts = append(plan.Conflicts, models.PlanConflict{
 					Target:     actualTarget,
-					Sources:    []string{firstClaimer, file.Path},
+					Sources:    []string{claimant, file.Path},
 					Resolution: "auto-renamed second file to " + filepath.Base(actualTarget),
 				})
 			case models.CollisionRename:
@@ -439,6 +489,7 @@ func (p *Planner) Plan(root string, files []models.File) (models.Plan, error) {
 			Action:      action,
 			IsCollision: isCollision,
 		})
+		collisionSources[filesystem.CaseKey(targetFile)] = append(collisionSources[filesystem.CaseKey(targetFile)], file.Path)
 	}
 
 	// Collect unique folders to create

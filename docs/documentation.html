@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="assets/fav.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600&family=Bricolage+Grotesque:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <!-- Lucide Icons CDN -->
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -73,6 +73,7 @@
             <li><a class="docs-nav-link" href="#cmd-man">man, preset & version</a></li>
             <li><a class="docs-nav-link" href="#cmd-completion">chest completion</a></li>
             <li><a class="docs-nav-link" href="#cmd-integrity"><strong>Plan &amp; Integrity</strong></a></li>
+            <li><a class="docs-nav-link" href="#cmd-hashcollisions">Collision handling</a></li>
           </ul>
         </div>
 
@@ -265,7 +266,17 @@
               <tr>
                 <td><span class="flag-badge">--collision</span></td>
                 <td>string</td>
-                <td>Destination-collision policy: <code>skip</code>, <code>rename</code>, <code>replace</code>, <code>abort</code>. Default (flag omitted): when two files in the same plan resolve to one destination, the second is auto-renamed (<code>photo (1).jpg</code>), case-normalized per platform, and every conflict is listed in the dry-run CONFLICTS block. An explicit <code>skip</code> leaves the second file in place instead.</td>
+                <td>Destination-collision policy: <code>skip</code>, <code>rename</code>, <code>replace</code>, <code>abort</code>. Default (flag omitted): any occupied destination, whether already on disk or claimed by another source in the plan, is auto-renamed (<code>photo (1).jpg</code>), case-normalized per platform, and listed in the dry-run CONFLICTS block. An explicit <code>skip</code> leaves the later file in place instead.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--hash-collisions</span></td>
+                <td>boolean</td>
+                <td>Hash only files in a destination conflict. Identical SHA-256 content is treated as a duplicate and is skipped by default; different content remains protected by the normal auto-rename chain.</td>
+              </tr>
+              <tr>
+                <td><span class="flag-badge">--keep-identical</span></td>
+                <td>boolean</td>
+                <td>With <code>--hash-collisions</code>, retain byte-identical conflict participants by assigning the next safe name, such as <code>photo (1).jpg</code>, instead of leaving the duplicate in place. The decision is reported in CONFLICTS.</td>
               </tr>
               <tr>
                 <td><span class="flag-badge">--json</span></td>
@@ -1191,17 +1202,38 @@ Continue? [y/N]: y
           <p>Explain which rule matches a given file, why, and where it would go — read-only. <code>rule check</code> validates <em>syntax</em>; <code>rule eval</code> validates <em>behaviour</em>.</p>
 
           <h3 id="cmd-hashcollisions">Content-aware collisions</h3>
-          <p><code>chest sort --hash-collisions</code> resolves same-destination conflicts by content instead of guessing.</p>
+          <p><code>chest sort --hash-collisions</code> resolves same-destination conflicts by content instead of guessing. CHEST hashes only the files that actually collide: distinct content is preserved through the normal <code>photo (1).jpg</code> rename chain, while an identical SHA-256 match is skipped by default. Use <code>--keep-identical</code> when the second path must be retained too.</p>
 
           <table class="flag-table">
             <thead><tr><th>Flag</th><th>Type</th><th>Description</th></tr></thead>
             <tbody>
               <tr><td><span class="flag-badge">--hash-collisions</span></td><td>boolean</td><td>Hash <strong>only the files involved in a collision</strong> — never the whole tree. Same SHA-256 means a genuine duplicate, so the second copy is skipped; different content means both are distinct, so the second is auto-renamed rather than clobbering the first.</td></tr>
+              <tr><td><span class="flag-badge">--keep-identical</span></td><td>boolean</td><td>Use with <code>--hash-collisions</code> to retain a byte-identical duplicate under the next safe name, such as <code>photo (1).jpg</code>. This makes the keep decision explicit and visible instead of silently dropping the second planned move.</td></tr>
               <tr><td><span class="flag-badge">--similar</span></td><td>boolean</td><td>On <code>duplicates</code>: group near-duplicate images by perceptual hash (DCT-based, stdlib only), reported separately from exact SHA-256 matches.</td></tr>
               <tr><td><span class="flag-badge">--threshold &lt;0-64&gt;</span></td><td>integer</td><td>Hamming distance tolerance for <code>--similar</code> (default 10).</td></tr>
               <tr><td><span class="flag-badge">--quarantine &lt;dir&gt;</span></td><td>string</td><td>On <code>duplicates</code>: opt-in, moves duplicates into a staging folder after confirmation. Never deletes, and is recorded in history so <code>undo</code> restores them.</td></tr>
             </tbody>
           </table>
+
+          <div class="callout-box info">
+            <i data-lucide="copy-check" style="color: var(--accent-cyan); font-size: 1.4rem; margin-top: 2px;"></i>
+            <div>
+              <strong style="color: var(--text-primary);">Retain identical files deliberately</strong>
+              <div style="color: var(--text-secondary); margin-top: 4px;">Add <code>--keep-identical</code> when the duplicate's path still matters. The second file is assigned the next collision-safe name — <code>photo (1).jpg</code> here — and the plan reports it as retained rather than skipped.</div>
+            </div>
+          </div>
+
+          <div class="code-block-wrapper">
+            <pre class="code-block"><code><span class="t-prompt">$</span> <span class="t-cmd">chest</span> <span class="t-subcmd">sort</span> <span class="t-flag">--format</span> <span class="t-flag">--hash-collisions</span> <span class="t-flag">--keep-identical</span>
+<span class="t-key">CHEST PLAN</span>  <span class="t-comment"># hash only the conflicting files</span>
+  <span class="t-cmd">photo.jpg</span>             <span class="t-pipe">→</span>  <span class="t-path">JPG/photo.jpg</span>
+  <span class="t-cmd">photo-copy.jpg</span>        <span class="t-pipe">→</span>  <span class="t-path">JPG/photo (1).jpg</span>
+
+<span class="t-key">CONFLICTS</span>
+  <span class="t-warn">identical content (sha256 match)</span>  <span class="t-comment">retained as JPG/photo (1).jpg</span>
+
+<span class="t-prompt">✔</span> <span class="t-str">2 files prepared · 1 identical collision retained · 0 files skipped</span></code></pre>
+          </div>
 
           <h3 id="cmd-liveindex">Continuous indexing &amp; trends</h3>
           <table class="flag-table">

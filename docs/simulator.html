@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Command Rehearsal — CHEST</title>
+  <meta name="description" content="Rehearse safe CHEST CLI workflows in your browser before installing the tool.">
+  <link rel="icon" type="image/png" href="assets/fav.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@400;500;600&family=Bricolage+Grotesque:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="simulator-page">
+  <div class="ambient-grid"></div>
+  <nav class="navbar" aria-label="Main Navigation">
+    <div class="container">
+      <div class="navbar-inner">
+        <a class="brand" href="index.html" aria-label="CHEST Homepage">
+          <img src="assets/logo1.png" alt="CHEST Logo" class="brand-logo-img">
+          <span>chest</span><span class="brand-tag">rehearsal</span>
+        </a>
+        <div class="nav-links">
+          <a class="nav-link" href="index.html"><i data-lucide="arrow-left"></i> Home</a>
+          <a class="nav-link" href="documentation.html"><i data-lucide="book-open"></i> Docs</a>
+          <a class="nav-link nav-cta" href="index.html#install"><i data-lucide="download"></i> Install</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="simulator-shell container">
+    <header class="simulator-intro">
+      <div>
+        <div class="section-tag"><i data-lucide="terminal-square"></i> Browser rehearsal</div>
+        <h1>Try the workflow<br><span>before the install.</span></h1>
+        <p>Explore CHEST commands with deterministic sample output. This page never reads or changes your files.</p>
+      </div>
+      <div class="simulator-seal" aria-label="Simulation only">
+        <svg viewBox="0 0 120 120" role="img" aria-label="Shield and terminal mark">
+          <circle cx="60" cy="60" r="47" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 6" class="seal-orbit" />
+          <path d="M60 24 88 35v22c0 19-11 31-28 39C43 88 32 76 32 57V35z" fill="none" stroke="currentColor" stroke-width="2" />
+          <path d="m48 57 8 7 14-16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span>Simulation<br>only</span>
+      </div>
+    </header>
+
+    <section class="simulator-board" aria-label="CHEST command simulator">
+      <aside class="simulator-sidebar">
+        <div class="sidebar-label">Choose a rehearsal</div>
+        <button class="command-choice is-active" data-command="sort" type="button"><i data-lucide="arrow-right-left"></i><span><strong>sort</strong><small>Preview a safe move plan</small></span></button>
+        <button class="command-choice command-choice-featured" data-command="collision" type="button"><i data-lucide="copy-check"></i><span><strong>collision guard</strong><small>Keep identical as (1)</small></span></button>
+        <button class="command-choice" data-command="search" type="button"><i data-lucide="search"></i><span><strong>search</strong><small>Find files by name or text</small></span></button>
+        <button class="command-choice" data-command="stats" type="button"><i data-lucide="bar-chart-3"></i><span><strong>stats</strong><small>Read local storage signals</small></span></button>
+        <button class="command-choice" data-command="doctor" type="button"><i data-lucide="stethoscope"></i><span><strong>doctor</strong><small>Inspect system health</small></span></button>
+        <button class="command-choice" data-command="undo" type="button"><i data-lucide="rotate-ccw"></i><span><strong>undo</strong><small>Rehearse a rollback</small></span></button>
+        <div class="sidebar-footnote"><i data-lucide="lock-keyhole"></i><span>No shell access<br>No filesystem access</span></div>
+      </aside>
+
+      <div class="simulator-main">
+        <div class="simulator-toolbar">
+          <span><i class="status-dot"></i> local mock environment</span>
+          <button class="clear-button" id="clear-output" type="button"><i data-lucide="trash-2"></i> Clear</button>
+        </div>
+        <form class="command-entry" id="command-form">
+          <label for="command-input">Command line</label>
+          <div class="command-input-wrap">
+            <span class="command-prompt">$</span>
+            <input id="command-input" autocomplete="off" spellcheck="false" value="chest sort ~/Downloads --dry-run">
+            <button class="run-button" type="submit"><i data-lucide="play"></i> Run rehearsal</button>
+          </div>
+          <p class="command-hint">Try changing the path or adding <code>--json</code>, or choose <strong>collision guard</strong> to rehearse <code>--keep-identical</code>. Outputs are sample data.</p>
+        </form>
+        <div class="output-label"><span>Terminal output</span><span id="output-status">ready</span></div>
+        <div class="sim-terminal" id="sim-terminal" role="log" aria-live="polite">
+          <div class="terminal-welcome"><span class="terminal-mark">CHEST</span><strong>Command rehearsal ready</strong><span>Choose a command or type one above, then run it.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="simulator-notes">
+      <div><i data-lucide="shield-check"></i><span><strong>Safe by design</strong> The simulator demonstrates planning and reporting only. It cannot access your machine.</span></div>
+      <a href="documentation.html#cli-reference">Read the full command reference <i data-lucide="arrow-up-right"></i></a>
+    </section>
+  </main>
+  <script src="simulator.js"></script>
+</body>
+</html>

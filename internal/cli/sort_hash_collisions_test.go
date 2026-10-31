@@ -101,6 +101,25 @@ func TestSortHashCollisionsRenamesDistinctContent(t *testing.T) {
 	}
 }
 
+func TestSortHashCollisionsKeepIdenticalRenamesDuplicate(t *testing.T) {
+	root := conflictFixture(t, "identical bytes", "identical bytes")
+
+	output, err := runSortOn(t, root, "-r", "--format", "--dry-run", "--yes", "--hash-collisions", "--keep-identical")
+	if err != nil {
+		t.Fatalf("sort --hash-collisions --keep-identical error = %v", err)
+	}
+
+	if !strings.Contains(output, "2 files would be moved") {
+		t.Errorf("keep-identical should plan both files:\n%s", output)
+	}
+	if !strings.Contains(output, "photo (1).jpg") {
+		t.Errorf("keep-identical should use the numbered stem collision name:\n%s", output)
+	}
+	if strings.Contains(output, "identical content") {
+		t.Errorf("keep-identical must not report the duplicate as skipped:\n%s", output)
+	}
+}
+
 // TestSortWithoutHashCollisionsAutoRenamesDuplicate is the regression guard:
 // with the flag off, two byte-identical files keep today's auto-rename result.
 func TestSortWithoutHashCollisionsAutoRenamesDuplicate(t *testing.T) {
