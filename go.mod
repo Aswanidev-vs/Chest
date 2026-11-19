@@ -7,7 +7,7 @@ require (
 	github.com/charlievieth/fastwalk v1.0.14
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/hashicorp/go-plugin v1.8.0
-	github.com/junegunn/fzf v0.74.4-0.20260831100935-52f4319a72c1
+	github.com/junegunn/fzf v0.74.5
 	github.com/ncruces/go-sqlite3 v0.35.4
 	github.com/shirou/gopsutil/v4 v4.26.2
 	github.com/showwin/speedtest-go v1.8.3
